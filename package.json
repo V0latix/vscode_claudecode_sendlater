@@ -1,0 +1,180 @@
+{
+  "name": "prompt-queue-usage-monitor",
+  "displayName": "Prompt Queue + Usage Monitor",
+  "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
+  "version": "0.1.0",
+  "publisher": "your-publisher-id",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["claude", "openai", "codex", "prompt", "queue", "rate-limit", "usage", "tokens"],
+  "icon": "media/icon.png",
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "promptQueue.queuePrompt",
+        "title": "Queue Prompt (Send Later)",
+        "category": "PromptQueue"
+      },
+      {
+        "command": "promptQueue.queueFromClipboard",
+        "title": "Queue From Clipboard",
+        "category": "PromptQueue"
+      },
+      {
+        "command": "promptQueue.queueFromEditor",
+        "title": "Queue From Current Editor",
+        "category": "PromptQueue"
+      },
+      {
+        "command": "promptQueue.imRateLimited",
+        "title": "I'm Rate Limited — Queue for Later",
+        "category": "PromptQueue"
+      },
+      {
+        "command": "promptQueue.processNow",
+        "title": "Process Queue Now",
+        "category": "PromptQueue"
+      },
+      {
+        "command": "usage.refresh",
+        "title": "Refresh Usage",
+        "category": "Usage",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "usage.showSummary",
+        "title": "Show Usage Summary",
+        "category": "Usage"
+      },
+      {
+        "command": "usage.setOpenAIKey",
+        "title": "Set OpenAI API Key (Secret)",
+        "category": "Usage"
+      },
+      {
+        "command": "usage.setAnthropicKey",
+        "title": "Set Anthropic Admin API Key (Secret)",
+        "category": "Usage"
+      },
+      {
+        "command": "usage.clearOpenAIKey",
+        "title": "Clear OpenAI API Key",
+        "category": "Usage"
+      },
+      {
+        "command": "usage.clearAnthropicKey",
+        "title": "Clear Anthropic Admin API Key",
+        "category": "Usage"
+      }
+    ],
+    "configuration": {
+      "title": "Prompt Queue + Usage Monitor",
+      "properties": {
+        "promptQueue.defaultDelayHours": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "description": "Default delay (hours) when queueing a prompt."
+        },
+        "promptQueue.outputDir": {
+          "type": "string",
+          "default": ".prompt-queue",
+          "description": "Workspace-relative directory where delivered prompt files are created."
+        },
+        "promptQueue.filenameTemplate": {
+          "type": "string",
+          "default": "{timestamp}_{id}.md",
+          "description": "Filename template. {timestamp} → YYYYMMDD_HHMM, {id} → short id."
+        },
+        "openai.orgId": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI Organization ID (optional, sent as Openai-Organization header)."
+        },
+        "openai.projectId": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI Project ID (optional, sent as Openai-Project header)."
+        },
+        "anthropic.orgId": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic Organization/Workspace ID (optional, used in API path)."
+        },
+        "usage.refreshIntervalMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "description": "Auto-refresh interval for usage data (minutes). Set 0 to disable."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "promptQueueContainer",
+          "title": "Prompt Queue",
+          "icon": "media/activitybar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "promptQueueContainer": [
+        {
+          "id": "usageMonitorView",
+          "name": "Usage Monitor",
+          "type": "tree"
+        },
+        {
+          "id": "promptQueueView",
+          "name": "Prompt Queue",
+          "type": "webview"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "usage.refresh",
+          "when": "view == usageMonitorView",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        { "command": "usage.refresh" },
+        { "command": "usage.showSummary" },
+        { "command": "usage.setOpenAIKey" },
+        { "command": "usage.setAnthropicKey" },
+        { "command": "usage.clearOpenAIKey" },
+        { "command": "usage.clearAnthropicKey" },
+        { "command": "promptQueue.queuePrompt" },
+        { "command": "promptQueue.queueFromClipboard" },
+        { "command": "promptQueue.queueFromEditor" },
+        { "command": "promptQueue.imRateLimited" },
+        { "command": "promptQueue.processNow" }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.23.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.3.3"
+  }
+}
