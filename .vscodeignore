@@ -9,3 +9,6 @@ node_modules/**
 out/test/**
 .github/**
 *.vsix
+.venv/**
+.prompt-queue/**
+.claude/**
