@@ -3,8 +3,12 @@
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
   "version": "0.1.0",
-  "publisher": "your-publisher-id",
+  "publisher": "vOlatix",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/V0latix/vscode_claudecode_sendlater.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
