@@ -339,6 +339,17 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Start background processes ─────────────────────────────────────────────
   processor.start();
 
+  // Also trigger processing when VS Code window gains focus (handles wake-from-sleep).
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState(state => {
+      if (state.focused) {
+        processor.process().catch(err =>
+          log.appendLine(`[Extension] Process-on-focus error: ${err}`)
+        );
+      }
+    })
+  );
+
   const config = vscode.workspace.getConfiguration('usage');
   const refreshInterval: number = config.get('refreshIntervalMinutes', 10);
   usageService.start(refreshInterval);

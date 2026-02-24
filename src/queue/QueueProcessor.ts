@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { QueueStore, QueueItem } from './QueueStore';
-import { isOverdue, formatDisplayTime } from '../util/time';
+import { isOverdue } from '../util/time';
 
 const PROCESS_INTERVAL_MS = 60_000; // 1 minute
 
@@ -34,16 +34,16 @@ export class QueueProcessor {
     }
   }
 
-  /** Process all due items immediately. */
-  async process(): Promise<void> {
+  /** Process all due items immediately. Returns number of items delivered. */
+  async process(): Promise<number> {
     const pending = this.store.getPending();
     const due = pending.filter(i => isOverdue(new Date(i.notBefore)));
 
-    if (due.length === 0) {
-      return;
-    }
+    this.log.appendLine(`[QueueProcessor] Tick: ${pending.length} pending, ${due.length} overdue`);
 
-    this.log.appendLine(`[QueueProcessor] Processing ${due.length} due item(s)…`);
+    if (due.length === 0) {
+      return 0;
+    }
 
     for (const item of due) {
       try {
@@ -55,30 +55,64 @@ export class QueueProcessor {
     }
 
     this.onDidChangeEmitter.fire();
+    return due.length;
+  }
+
+  /** Force-deliver a specific item immediately, regardless of its notBefore time. */
+  async forceDeliver(id: string): Promise<void> {
+    const item = this.store.getAll().find(i => i.id === id && !i.processed);
+    if (!item) { return; }
+    try {
+      await this.deliver(item);
+    } catch (err) {
+      this.log.appendLine(`[QueueProcessor] Error force-delivering ${id}: ${err}`);
+      vscode.window.showErrorMessage(`PromptQueue: failed to deliver ${id}: ${err}`);
+    }
+    this.onDidChangeEmitter.fire();
   }
 
   private async deliver(item: QueueItem): Promise<void> {
-    const folder = this.resolveWorkspaceFolder(item);
-    const cwd = folder?.uri.fsPath ?? os.homedir();
+    const existing = this.findClaudeTerminal();
 
-    // Write prompt to a temp file — handles multiline safely, no shell-quoting issues
-    const tmpFile = path.join(os.tmpdir(), `cq-${item.id}.txt`);
-    fs.writeFileSync(tmpFile, item.promptText, 'utf8');
+    if (existing) {
+      // Send directly to the existing Claude Code session.
+      // Bracketed paste mode (\x1b[200~ ... \x1b[201~) lets us inject multi-line text
+      // as a single unit — newlines won't trigger premature submission.
+      this.log.appendLine(`[QueueProcessor] Sending to existing terminal "${existing.name}"`);
+      existing.show(true);
+      const safe = item.promptText.replace(/\x1b/g, ''); // strip rogue ESC chars
+      existing.sendText(`\x1b[200~${safe}\x1b[201~`, /* addNewLine */ true);
+    } else {
+      // No Claude terminal found — create one and launch Claude Code CLI.
+      this.log.appendLine(`[QueueProcessor] No Claude terminal found, creating new session`);
+      const folder = this.resolveWorkspaceFolder(item);
+      const cwd = folder?.uri.fsPath ?? os.homedir();
+      const tmpFile = path.join(os.tmpdir(), `cq-${item.id}.txt`);
+      fs.writeFileSync(tmpFile, item.promptText, 'utf8');
+      const terminal = vscode.window.createTerminal({ name: 'Claude', cwd });
+      terminal.show(true);
+      terminal.sendText(`claude "$(cat '${tmpFile}')" ; rm -f '${tmpFile}'`);
+    }
 
-    // Open a dedicated terminal and launch Claude Code CLI.
-    // The rm cleans up the temp file once claude exits.
-    const terminal = vscode.window.createTerminal({
-      name: `Claude ▶ ${item.id}`,
-      cwd,
-    });
-    terminal.show(/* preserveFocus */ false);
-    terminal.sendText(`claude "$(cat '${tmpFile}')" ; rm -f '${tmpFile}'`);
+    // Remove from queue (not just mark processed).
+    await this.store.remove(item.id);
 
-    await this.store.markProcessed(item.id);
-
-    this.log.appendLine(`[QueueProcessor] Launched Claude for ${item.id} in ${cwd}`);
+    this.log.appendLine(`[QueueProcessor] Delivered ${item.id}`);
     vscode.window.showInformationMessage(
-      `PromptQueue: Prompt sent to Claude — terminal opened  [id: ${item.id}]`
+      `PromptQueue: Prompt sent to Claude  [id: ${item.id}]`
+    );
+  }
+
+  /**
+   * Find an existing terminal that looks like a Claude Code session.
+   * Prefers a terminal named exactly 'Claude' (created by a previous delivery),
+   * then falls back to any terminal whose name contains 'claude' (case-insensitive).
+   */
+  private findClaudeTerminal(): vscode.Terminal | undefined {
+    const terminals = vscode.window.terminals;
+    return (
+      terminals.find(t => t.name === 'Claude') ??
+      terminals.find(t => t.name.toLowerCase().includes('claude'))
     );
   }
 

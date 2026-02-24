@@ -13,7 +13,8 @@ type InMsg =
   | { type: 'useSelection' }
   | { type: 'queuePrompt'; promptText: string; delayHours: number }
   | { type: 'deleteItem'; id: string }
-  | { type: 'processNow' };
+  | { type: 'processNow' }
+  | { type: 'forceSend'; id: string };
 
 // ── Message types (extension → webview) ───────────────────────────────────────
 type OutMsg =
@@ -132,8 +133,19 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         this.sendQueue();
         break;
 
-      case 'processNow':
-        await this.processor.process();
+      case 'processNow': {
+        const count = await this.processor.process();
+        this.sendQueue();
+        if (count === 0) {
+          this.post({ type: 'toast', level: 'info', message: 'No overdue items to process.' });
+        } else {
+          this.post({ type: 'toast', level: 'info', message: `Sent ${count} prompt(s) to Claude.` });
+        }
+        break;
+      }
+
+      case 'forceSend':
+        await this.processor.forceDeliver(msg.id);
         this.sendQueue();
         break;
     }
@@ -414,19 +426,24 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .item-delete {
+  .item-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    opacity: 0;
+  }
+  .queue-item:hover .item-actions { opacity: 1; }
+  .item-delete, .item-send {
     background: transparent;
     border: none;
-    color: var(--vscode-descriptionForeground);
     cursor: pointer;
-    padding: 0 2px;
-    font-size: 1em;
-    opacity: 0;
-    flex-shrink: 0;
+    padding: 0 3px;
+    font-size: 0.9em;
     border-radius: 2px;
+    color: var(--vscode-descriptionForeground);
   }
-  .queue-item:hover .item-delete { opacity: 1; }
   .item-delete:hover { color: var(--vscode-errorForeground, #f48771); }
+  .item-send:hover { color: var(--vscode-textLink-foreground, #4fc1ff); }
 
   .empty-state {
     color: var(--vscode-descriptionForeground);
@@ -722,11 +739,20 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     <div class="\${timeCls}">\${timeLabel}</div>
     <div class="item-preview">\${esc(previewTrunc)}</div>
   </div>
-  \${!item.processed
-    ? \`<button class="item-delete" data-id="\${item.id}" title="Remove">×</button>\`
-    : ''}
+  \${!item.processed ? \`<div class="item-actions">
+    <button class="item-send" data-id="\${item.id}" title="Send to Claude now">➤</button>
+    <button class="item-delete" data-id="\${item.id}" title="Remove">×</button>
+  </div>\` : ''}
 </div>\`;
     }).join('');
+
+    // Wire send buttons
+    queueList.querySelectorAll('.item-send').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'forceSend', id: btn.dataset.id });
+      });
+    });
 
     // Wire delete buttons
     queueList.querySelectorAll('.item-delete').forEach(btn => {
