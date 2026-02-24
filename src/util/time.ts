@@ -49,6 +49,13 @@ export function addHours(base: Date, hours: number): Date {
 }
 
 /**
+ * Return the Date that is `minutes` minutes from now.
+ */
+export function addMinutes(base: Date, minutes: number): Date {
+  return new Date(base.getTime() + minutes * 60_000);
+}
+
+/**
  * Return the start of the 5-hour sliding window (now - 5h).
  */
 export function getWindowStart5h(now = new Date()): Date {

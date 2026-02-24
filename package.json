@@ -2,7 +2,7 @@
   "name": "prompt-queue-usage-monitor",
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "v0latix",
   "license": "MIT",
   "repository": {
@@ -84,11 +84,11 @@
     "configuration": {
       "title": "Prompt Queue + Usage Monitor",
       "properties": {
-        "promptQueue.defaultDelayHours": {
+        "promptQueue.defaultDelayMinutes": {
           "type": "number",
-          "default": 5,
+          "default": 30,
           "minimum": 0,
-          "description": "Default delay (hours) when queueing a prompt."
+          "description": "Default delay (minutes) when queueing a prompt."
         },
         "promptQueue.outputDir": {
           "type": "string",

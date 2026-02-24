@@ -72,7 +72,7 @@ export class QueueProcessor {
   }
 
   private async deliver(item: QueueItem): Promise<void> {
-    const existing = this.findClaudeTerminal();
+    const existing = this.findClaudeTerminal(item.targetTerminalName);
 
     if (existing) {
       // Send directly to the existing Claude Code session.
@@ -80,8 +80,11 @@ export class QueueProcessor {
       // as a single unit — newlines won't trigger premature submission.
       this.log.appendLine(`[QueueProcessor] Sending to existing terminal "${existing.name}"`);
       existing.show(true);
-      const safe = item.promptText.replace(/\x1b/g, ''); // strip rogue ESC chars
-      existing.sendText(`\x1b[200~${safe}\x1b[201~`, /* addNewLine */ true);
+      // Strip ESC chars to avoid interfering with Claude Code CLI's TUI keybindings.
+      // \x1b[200~…\x1b[201~ (bracketed paste) starts with ESC (\x1b) which Claude Code
+      // CLI interprets as the Escape key — closing the current conversation context.
+      const safe = item.promptText.replace(/\x1b/g, '');
+      existing.sendText(safe, true);
     } else {
       // No Claude terminal found — create one and launch Claude Code CLI.
       this.log.appendLine(`[QueueProcessor] No Claude terminal found, creating new session`);
@@ -104,15 +107,24 @@ export class QueueProcessor {
   }
 
   /**
-   * Find an existing terminal that looks like a Claude Code session.
-   * Prefers a terminal named exactly 'Claude' (created by a previous delivery),
-   * then falls back to any terminal whose name contains 'claude' (case-insensitive).
+   * Find the terminal to deliver to.
+   *
+   * Priority:
+   *  1. Terminal whose name matches the hint recorded at queue time.
+   *  2. Terminal named exactly 'Claude' (created by a previous delivery).
+   *  3. Any terminal whose name contains 'claude' (case-insensitive).
+   *  4. The currently active terminal (last resort — user may have it focused).
    */
-  private findClaudeTerminal(): vscode.Terminal | undefined {
+  private findClaudeTerminal(hint?: string): vscode.Terminal | undefined {
     const terminals = vscode.window.terminals;
+    if (hint) {
+      const byHint = terminals.find(t => t.name === hint);
+      if (byHint) { return byHint; }
+    }
     return (
       terminals.find(t => t.name === 'Claude') ??
-      terminals.find(t => t.name.toLowerCase().includes('claude'))
+      terminals.find(t => t.name.toLowerCase().includes('claude')) ??
+      vscode.window.activeTerminal
     );
   }
 

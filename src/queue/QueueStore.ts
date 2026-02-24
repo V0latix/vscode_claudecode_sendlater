@@ -13,6 +13,8 @@ export interface QueueItem {
   workspaceFolder: string;
   /** Already delivered / processed. */
   processed: boolean;
+  /** Name of the terminal that was active when the item was queued (delivery hint). */
+  targetTerminalName?: string;
 }
 
 const STORAGE_KEY = 'promptQueue.items';

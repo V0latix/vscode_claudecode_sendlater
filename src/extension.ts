@@ -12,7 +12,7 @@ import { UsageService } from './usage/UsageService';
 import { UsageWebviewProvider } from './ui/UsageWebviewProvider';
 import { QueueWebviewProvider } from './ui/QueueWebviewProvider';
 import { generateShortId } from './util/crypto';
-import { addHours, formatDisplayTime, parseRateLimitDelay, parseRateLimitMessage, RateLimitInfo } from './util/time';
+import { addHours, addMinutes, formatDisplayTime, parseRateLimitDelay, parseRateLimitMessage, RateLimitInfo } from './util/time';
 
 export function activate(context: vscode.ExtensionContext): void {
   // ── Output channel ─────────────────────────────────────────────────────────
@@ -157,13 +157,13 @@ export function activate(context: vscode.ExtensionContext): void {
         // Fallback: ask for manual delay
         const manualStr = await vscode.window.showInputBox({
           title: 'Rate Limit — Manual delay',
-          prompt: 'Could not detect a reset time. Enter the delay manually (hours):',
-          value: '5',
+          prompt: 'Could not detect a reset time. Enter the delay manually (minutes):',
+          value: '30',
           validateInput: v => (isNaN(parseFloat(v)) || parseFloat(v) <= 0 ? 'Positive number required' : null),
           ignoreFocusOut: true,
         });
         if (!manualStr) { return; }
-        const h = parseFloat(manualStr);
+        const h = parseFloat(manualStr) / 60;
         rateLimitInfo = {
           delayHours: h,
           resetAt: new Date(Date.now() + h * 3_600_000),
@@ -182,7 +182,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const confirmItems: vscode.QuickPickItem[] = [
       {
         label: `$(clock) Queue for ${resetLabel}${confidenceTag}`,
-        description: `Detected from ${sourceLabel} — delay: ${delayHours}h`,
+        description: `Detected from ${sourceLabel} — delay: ${Math.round(delayHours * 60)}min`,
         detail: `Your prompt will be delivered as a .md file at ${resetLabel}`,
       },
       {
@@ -206,13 +206,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
     if (picked.label.includes('Change delay')) {
       const overrideStr = await vscode.window.showInputBox({
-        title: 'Override delay (hours)',
-        value: String(delayHours),
+        title: 'Override delay (minutes)',
+        value: String(Math.round(delayHours * 60)),
         validateInput: v => (isNaN(parseFloat(v)) || parseFloat(v) <= 0 ? 'Positive number required' : null),
         ignoreFocusOut: true,
       });
       if (!overrideStr) { return; }
-      finalDelay = parseFloat(overrideStr);
+      finalDelay = parseFloat(overrideStr) / 60;
     }
 
     // ── Step 5: get prompt text ────────────────────────────────────────────
@@ -231,6 +231,7 @@ export function activate(context: vscode.ExtensionContext): void {
       promptText,
       workspaceFolder,
       processed: false,
+      targetTerminalName: vscode.window.activeTerminal?.name,
     };
 
     await store.add(item);
@@ -453,19 +454,19 @@ export function activate(context: vscode.ExtensionContext): void {
    */
   async function enqueuePrompt(promptText: string): Promise<void> {
     const cfg = vscode.workspace.getConfiguration('promptQueue');
-    const defaultDelay: number = cfg.get('defaultDelayHours', 5);
+    const defaultDelayMinutes: number = cfg.get('defaultDelayMinutes', 30);
 
     // Try to detect rate-limit hint in clipboard / active editor
-    let suggestedDelay = defaultDelay;
+    let suggestedMinutes = defaultDelayMinutes;
     try {
       const clip = await vscode.env.clipboard.readText();
-      const parsed = parseRateLimitDelay(clip);
-      if (parsed) { suggestedDelay = Math.ceil(parsed * 10) / 10; }
+      const parsedHours = parseRateLimitDelay(clip);
+      if (parsedHours) { suggestedMinutes = Math.round(parsedHours * 60); }
     } catch { /* ignore */ }
 
     const delayStr = await vscode.window.showInputBox({
-      prompt: `Delay before delivery (hours). Detected: ${suggestedDelay}h`,
-      value: String(suggestedDelay),
+      prompt: `Delay before delivery (minutes). Detected: ${suggestedMinutes}min`,
+      value: String(suggestedMinutes),
       validateInput: (v) => {
         const n = parseFloat(v);
         if (isNaN(n) || n < 0) { return 'Enter a positive number'; }
@@ -476,9 +477,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
     if (delayStr === undefined) { return; } // User cancelled
 
-    const delayHours = parseFloat(delayStr);
+    const delayMinutes = parseFloat(delayStr);
     const now = new Date();
-    const notBefore = addHours(now, delayHours);
+    const notBefore = addMinutes(now, delayMinutes);
 
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
@@ -489,6 +490,7 @@ export function activate(context: vscode.ExtensionContext): void {
       promptText,
       workspaceFolder,
       processed: false,
+      targetTerminalName: vscode.window.activeTerminal?.name,
     };
 
     await store.add(item);
