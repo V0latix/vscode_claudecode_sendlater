@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { QueueStore, QueueItem } from './QueueStore';
-import { isOverdue, formatTimestamp, formatDisplayTime } from '../util/time';
-import { ensureDir, resolveCollision, writeText } from '../util/fs';
+import { isOverdue, formatDisplayTime } from '../util/time';
 
 const PROCESS_INTERVAL_MS = 60_000; // 1 minute
 
@@ -57,67 +58,28 @@ export class QueueProcessor {
   }
 
   private async deliver(item: QueueItem): Promise<void> {
-    // Resolve the target workspace folder
     const folder = this.resolveWorkspaceFolder(item);
-    if (!folder) {
-      this.log.appendLine(`[QueueProcessor] No workspace folder for item ${item.id} — skipping.`);
-      // Still mark processed to avoid infinite retry
-      await this.store.markProcessed(item.id);
-      vscode.window.showWarningMessage(
-        `PromptQueue: No workspace open to deliver prompt ${item.id}. Open a workspace and use "Process Queue Now".`
-      );
-      return;
-    }
+    const cwd = folder?.uri.fsPath ?? os.homedir();
 
-    const config = vscode.workspace.getConfiguration('promptQueue');
-    const outputDir: string = config.get('outputDir', '.prompt-queue');
-    const template: string = config.get('filenameTemplate', '{timestamp}_{id}.md');
+    // Write prompt to a temp file — handles multiline safely, no shell-quoting issues
+    const tmpFile = path.join(os.tmpdir(), `cq-${item.id}.txt`);
+    fs.writeFileSync(tmpFile, item.promptText, 'utf8');
 
-    // Build filename from template
-    const timestamp = formatTimestamp(new Date(item.notBefore));
-    const filename = template
-      .replace('{timestamp}', timestamp)
-      .replace('{id}', item.id);
+    // Open a dedicated terminal and launch Claude Code CLI.
+    // The rm cleans up the temp file once claude exits.
+    const terminal = vscode.window.createTerminal({
+      name: `Claude ▶ ${item.id}`,
+      cwd,
+    });
+    terminal.show(/* preserveFocus */ false);
+    terminal.sendText(`claude "$(cat '${tmpFile}')" ; rm -f '${tmpFile}'`);
 
-    const dirUri = vscode.Uri.joinPath(folder.uri, outputDir);
-    await ensureDir(dirUri);
-
-    const fileUri = await resolveCollision(vscode.Uri.joinPath(dirUri, filename));
-
-    // Build file content
-    const header = [
-      `<!-- Prompt Queue Delivery -->`,
-      `<!-- id: ${item.id} -->`,
-      `<!-- created: ${formatDisplayTime(new Date(item.createdAt))} -->`,
-      `<!-- notBefore: ${formatDisplayTime(new Date(item.notBefore))} -->`,
-      `<!-- delivered: ${formatDisplayTime(new Date())} -->`,
-      ``,
-      `# Queued Prompt`,
-      ``,
-    ].join('\n');
-
-    const content = header + item.promptText + '\n';
-    await writeText(fileUri, content);
-
-    // Mark as processed
     await this.store.markProcessed(item.id);
 
-    this.log.appendLine(`[QueueProcessor] Delivered: ${fileUri.fsPath}`);
-
-    // Notification with actions
-    const relPath = path.join(outputDir, path.basename(fileUri.fsPath));
-    const action = await vscode.window.showInformationMessage(
-      `PromptQueue: Prompt file created — ${relPath}`,
-      'Open File',
-      'Reveal in Explorer'
+    this.log.appendLine(`[QueueProcessor] Launched Claude for ${item.id} in ${cwd}`);
+    vscode.window.showInformationMessage(
+      `PromptQueue: Prompt sent to Claude — terminal opened  [id: ${item.id}]`
     );
-
-    if (action === 'Open File') {
-      const doc = await vscode.workspace.openTextDocument(fileUri);
-      await vscode.window.showTextDocument(doc);
-    } else if (action === 'Reveal in Explorer') {
-      await vscode.commands.executeCommand('revealInExplorer', fileUri);
-    }
   }
 
   private resolveWorkspaceFolder(item: QueueItem): vscode.WorkspaceFolder | undefined {

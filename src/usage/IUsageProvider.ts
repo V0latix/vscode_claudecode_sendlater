@@ -20,6 +20,12 @@ export interface TokenUsage {
   error?: string;
   /** True if the API has a known data lag (e.g. a few minutes behind). */
   dataDelay?: boolean;
+  /** Session (last 5h / per-session) quota from claude.ai. */
+  sessionUsage?: { used: number; limit: number; percent: number; resetAt: Date | null };
+  /** Weekly quota from claude.ai. */
+  weeklyUsage?: { used: number; limit: number; percent: number; resetAt: Date | null };
+  /** Opus-specific quota from claude.ai. */
+  opusUsage?: { used: number; limit: number; percent: number };
 }
 
 export type ProviderStatus = 'ok' | 'no-key' | 'error' | 'unconfigured';

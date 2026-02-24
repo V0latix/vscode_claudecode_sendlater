@@ -74,6 +74,11 @@
         "command": "usage.clearAnthropicKey",
         "title": "Clear Anthropic Admin API Key",
         "category": "Usage"
+      },
+      {
+        "command": "usage.setLimits",
+        "title": "Calibrate Limits from claude.ai %",
+        "category": "Usage"
       }
     ],
     "configuration": {
@@ -115,6 +120,18 @@
           "default": 10,
           "minimum": 0,
           "description": "Auto-refresh interval for usage data (minutes). Set 0 to disable."
+        },
+        "claude.tokenLimit5h": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Claude token limit for the 5-hour rolling window. Set via 'Usage: Calibrate Limits' command."
+        },
+        "claude.tokenLimitWeekly": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Claude token limit for the weekly window. Set via 'Usage: Calibrate Limits' command."
         }
       }
     },
@@ -132,7 +149,7 @@
         {
           "id": "usageMonitorView",
           "name": "Usage Monitor",
-          "type": "tree"
+          "type": "webview"
         },
         {
           "id": "promptQueueView",
@@ -156,6 +173,7 @@
         { "command": "usage.setAnthropicKey" },
         { "command": "usage.clearOpenAIKey" },
         { "command": "usage.clearAnthropicKey" },
+        { "command": "usage.setLimits" },
         { "command": "promptQueue.queuePrompt" },
         { "command": "promptQueue.queueFromClipboard" },
         { "command": "promptQueue.queueFromEditor" },

@@ -5,7 +5,8 @@ import { formatDisplayTime } from '../util/time';
 type UsageTreeNode =
   | { kind: 'header'; label: string; description: string; icon: string }
   | { kind: 'row'; label: string; value: string; icon: string }
-  | { kind: 'provider'; name: string; status: string; error?: string };
+  | { kind: 'provider'; name: string; status: string; error?: string }
+  | { kind: 'quota'; label: string; used: number; limit: number; percent: number; resetAt: Date | null };
 
 export class UsageViewProvider implements vscode.TreeDataProvider<UsageTreeNode> {
   private readonly service: UsageService;
@@ -38,6 +39,19 @@ export class UsageViewProvider implements vscode.TreeDataProvider<UsageTreeNode>
         item.iconPath = new vscode.ThemeIcon(
           element.error ? 'warning' : 'check'
         );
+        return item;
+      }
+      case 'quota': {
+        const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+        const resetPart = element.resetAt ? ` — resets in ${formatResetIn(element.resetAt)}` : '';
+        item.description = `${element.percent}% (${formatNumber(element.used)}/${formatNumber(element.limit)})${resetPart}`;
+        const color =
+          element.percent >= 85
+            ? new vscode.ThemeColor('charts.red')
+            : element.percent >= 60
+            ? new vscode.ThemeColor('charts.yellow')
+            : new vscode.ThemeColor('charts.green');
+        item.iconPath = new vscode.ThemeIcon('circle-filled', color);
         return item;
       }
     }
@@ -90,6 +104,38 @@ export class UsageViewProvider implements vscode.TreeDataProvider<UsageTreeNode>
       }
     );
 
+    // ── Claude quota rows (injected after summary rows) ────────────────────
+    const claudeEntry = data.providers.find(
+      (p) => p.name === 'Claude (OAuth)' && !p.usage.error
+    );
+    if (claudeEntry) {
+      const { sessionUsage, weeklyUsage, opusUsage } = claudeEntry.usage;
+      if (sessionUsage) {
+        nodes.push({
+          kind: 'quota',
+          label: 'Session usage',
+          ...sessionUsage,
+        });
+      }
+      if (weeklyUsage) {
+        nodes.push({
+          kind: 'quota',
+          label: 'Weekly usage',
+          ...weeklyUsage,
+        });
+      }
+      if (opusUsage) {
+        nodes.push({
+          kind: 'quota',
+          label: 'Opus usage',
+          used: opusUsage.used,
+          limit: opusUsage.limit,
+          percent: opusUsage.percent,
+          resetAt: null,
+        });
+      }
+    }
+
     // ── Providers ─────────────────────────────────────────────────────────────
     nodes.push({
       kind: 'header',
@@ -125,4 +171,23 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) { return `${(n / 1_000_000).toFixed(2)}M`; }
   if (n >= 1_000) { return `${(n / 1_000).toFixed(1)}K`; }
   return n.toString();
+}
+
+function formatResetIn(date: Date): string {
+  const diffMs = date.getTime() - Date.now();
+  if (diffMs <= 0) { return '—'; }
+
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  const totalHours = Math.floor(totalMinutes / 60);
+  const totalDays = Math.floor(totalHours / 24);
+
+  if (totalDays >= 1) {
+    const remainingHours = totalHours - totalDays * 24;
+    return remainingHours > 0 ? `${totalDays}d ${remainingHours}h` : `${totalDays}d`;
+  }
+  if (totalHours >= 1) {
+    const remainingMinutes = totalMinutes - totalHours * 60;
+    return remainingMinutes > 0 ? `${totalHours}h ${remainingMinutes}m` : `${totalHours}h`;
+  }
+  return `${totalMinutes}m`;
 }

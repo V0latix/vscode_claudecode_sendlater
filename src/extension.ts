@@ -4,11 +4,12 @@
 import * as vscode from 'vscode';
 import { QueueStore } from './queue/QueueStore';
 import { QueueProcessor } from './queue/QueueProcessor';
+import { ClaudeLocalProvider } from './usage/ClaudeLocalProvider';
 import { OpenAIUsageProvider } from './usage/OpenAIUsageProvider';
 import { AnthropicUsageProvider } from './usage/AnthropicUsageProvider';
 import { LocalEstimateProvider } from './usage/LocalEstimateProvider';
 import { UsageService } from './usage/UsageService';
-import { UsageViewProvider } from './ui/UsageViewProvider';
+import { UsageWebviewProvider } from './ui/UsageWebviewProvider';
 import { QueueWebviewProvider } from './ui/QueueWebviewProvider';
 import { generateShortId } from './util/crypto';
 import { addHours, formatDisplayTime, parseRateLimitDelay, parseRateLimitMessage, RateLimitInfo } from './util/time';
@@ -24,21 +25,26 @@ export function activate(context: vscode.ExtensionContext): void {
   const processor = new QueueProcessor(store, log);
 
   // ── Usage providers ────────────────────────────────────────────────────────
+  const claudeLocalProvider = new ClaudeLocalProvider(log);
   const openaiProvider = new OpenAIUsageProvider(context.secrets, log);
   const anthropicProvider = new AnthropicUsageProvider(context.secrets, log);
   const localProvider = new LocalEstimateProvider(store);
 
   const usageService = new UsageService(
-    [openaiProvider, anthropicProvider, localProvider],
+    [claudeLocalProvider, openaiProvider, anthropicProvider, localProvider],
     log
   );
 
-  // ── Tree views ─────────────────────────────────────────────────────────────
-  const usageViewProvider = new UsageViewProvider(usageService);
+  // ── Views ───────────────────────────────────────────────────────────────────
+  const usageWebviewProvider = new UsageWebviewProvider(usageService);
   const queueWebviewProvider = new QueueWebviewProvider(store, processor, log);
 
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('usageMonitorView', usageViewProvider),
+    vscode.window.registerWebviewViewProvider(
+      UsageWebviewProvider.viewType,
+      usageWebviewProvider,
+      { webviewOptions: { retainContextWhenHidden: true } }
+    ),
     vscode.window.registerWebviewViewProvider(
       QueueWebviewProvider.viewType,
       queueWebviewProvider,
@@ -243,6 +249,10 @@ export function activate(context: vscode.ExtensionContext): void {
     await usageService.refresh();
   });
 
+  const cmdSetLimits = vscode.commands.registerCommand('usage.setLimits', () => {
+    usageWebviewProvider.promptSetLimits();
+  });
+
   const cmdShowSummary = vscode.commands.registerCommand('usage.showSummary', async () => {
     const data = usageService.getCached();
     if (!data) {
@@ -318,6 +328,7 @@ export function activate(context: vscode.ExtensionContext): void {
     cmdImRateLimited,
     cmdProcessNow,
     cmdRefreshUsage,
+    cmdSetLimits,
     cmdShowSummary,
     cmdSetOpenAIKey,
     cmdSetAnthropicKey,
