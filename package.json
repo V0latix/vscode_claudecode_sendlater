@@ -3,7 +3,7 @@
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
   "version": "0.1.0",
-  "publisher": "vOlatix",
+  "publisher": "v0latix",
   "license": "MIT",
   "repository": {
     "type": "git",
