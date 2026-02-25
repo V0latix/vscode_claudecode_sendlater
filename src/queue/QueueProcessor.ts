@@ -84,7 +84,8 @@ export class QueueProcessor {
       // \x1b[200~…\x1b[201~ (bracketed paste) starts with ESC (\x1b) which Claude Code
       // CLI interprets as the Escape key — closing the current conversation context.
       const safe = item.promptText.replace(/\x1b/g, '');
-      existing.sendText(safe, true);
+      existing.sendText(safe, false);
+      existing.sendText('\r', false); // Press Enter to submit
     } else {
       // No Claude terminal found — create one and launch Claude Code CLI.
       this.log.appendLine(`[QueueProcessor] No Claude terminal found, creating new session`);

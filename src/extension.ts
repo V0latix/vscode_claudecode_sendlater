@@ -7,7 +7,6 @@ import { QueueProcessor } from './queue/QueueProcessor';
 import { ClaudeLocalProvider } from './usage/ClaudeLocalProvider';
 import { OpenAIUsageProvider } from './usage/OpenAIUsageProvider';
 import { AnthropicUsageProvider } from './usage/AnthropicUsageProvider';
-import { LocalEstimateProvider } from './usage/LocalEstimateProvider';
 import { UsageService } from './usage/UsageService';
 import { UsageWebviewProvider } from './ui/UsageWebviewProvider';
 import { QueueWebviewProvider } from './ui/QueueWebviewProvider';
@@ -28,10 +27,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const claudeLocalProvider = new ClaudeLocalProvider(log);
   const openaiProvider = new OpenAIUsageProvider(context.secrets, log);
   const anthropicProvider = new AnthropicUsageProvider(context.secrets, log);
-  const localProvider = new LocalEstimateProvider(store);
-
   const usageService = new UsageService(
-    [claudeLocalProvider, openaiProvider, anthropicProvider, localProvider],
+    [claudeLocalProvider, openaiProvider, anthropicProvider],
     log
   );
 

@@ -14,7 +14,7 @@ export interface AggregatedUsage {
     name: string;
     usage: TokenUsage;
   }[];
-  /** Combined best-estimate tokens (from API providers first, then local). */
+  /** Combined best-estimate tokens (from first provider without error). */
   bestTokensLast5h: number;
   bestTokensLast7d: number;
   lastRefreshed: Date | undefined;
@@ -84,11 +84,8 @@ export class UsageService {
       };
     });
 
-    // Compute best estimates: prefer providers that have no error
-    const apiProviders = providers.filter(p => p.name !== 'Local Estimate');
-    const localProvider = providers.find(p => p.name === 'Local Estimate');
-
-    const bestSource = apiProviders.find(p => !p.usage.error) ?? localProvider;
+    // Compute best estimates: use first provider without error
+    const bestSource = providers.find(p => !p.usage.error);
 
     const result: AggregatedUsage = {
       providers,
