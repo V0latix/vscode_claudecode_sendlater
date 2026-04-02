@@ -1,6 +1,6 @@
 # Prompt Queue + Usage Monitor
 
-A VS Code extension that lets you **queue prompts for later delivery** (ideal when you hit a rate limit) and **monitor your AI token usage** (Claude / OpenAI Codex) directly in the editor.
+A VS Code extension that lets you **queue prompts for later delivery** (ideal when you hit a rate limit), **monitor your AI token usage** (Claude / OpenAI Codex), and **browse your Claude Code slash commands** — all directly in the editor.
 
 ---
 
@@ -13,7 +13,9 @@ Queue any prompt now; the extension automatically creates a ready-to-use Markdow
 - Select text in any editor → **PromptQueue: Queue Prompt (Send Later)**
 - Or paste from clipboard → **PromptQueue: Queue From Clipboard**
 - Or take the whole current file → **PromptQueue: Queue From Current Editor**
-- Auto-detects "try again in X hours" in clipboard text and pre-fills the delay
+- **Delay mode**: enter a delay in minutes (e.g. `30`)
+- **At-time mode**: enter a target time directly (e.g. `22:00`) — automatically rolls to the next day if the time has already passed
+- Auto-detects "try again in X hours" / "resets at HH:MM" in clipboard text and pre-fills the delay
 - File is created in `.prompt-queue/YYYYMMDD_HHMM_<id>.md` with a clean header
 - Survives VS Code restarts (queue is persisted in global state)
 
@@ -21,9 +23,21 @@ Queue any prompt now; the extension automatically creates a ready-to-use Markdow
 
 View your last-5-hour and last-7-day token consumption via a panel in the Activity Bar.
 
+- **Claude** local history (reads `~/.claude/history.jsonl`)
 - **OpenAI** usage via the organization Usage API
 - **Anthropic** usage via the Admin API
 - **Local estimate** (no keys needed) — counts queued prompt tokens as a rough proxy
+
+### C — Claude Commands Browser
+
+Browse all your Claude Code slash commands (`/tools/…`, `/workflows/…`) directly in the sidebar.
+
+- Scans `.claude/commands/**/*.md` in your workspace automatically
+- Shows command name, category, and description (from YAML frontmatter)
+- **Click** any command card to copy its slash path (e.g. `/tools/git-status`) to the clipboard
+- **Search** to filter by name or description with live highlight
+- **Open** button to view the full command file in the editor
+- Refreshes on demand with the ↻ button
 
 ---
 
@@ -31,7 +45,7 @@ View your last-5-hour and last-7-day token consumption via a panel in the Activi
 
 ### 1. Install and Open
 
-```
+```bash
 # From source
 npm install
 ```
@@ -45,10 +59,10 @@ Click the **clock icon** in the Activity Bar to open the *Prompt Queue* panel.
 1. Write or select your prompt in any editor.
 2. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
 3. Run **PromptQueue: Queue Prompt (Send Later)**.
-4. Enter the delay in hours (default: 5).
-5. Confirmation: *"Prompt queued for 2024-06-15 20:00 [id: abc12345]"*.
+4. Enter a delay in minutes (`30`) **or** a specific time (`22:00`).
+5. Confirmation: *"Prompt queued for 2024-06-15 22:00 [id: abc12345]"*.
 
-When the time arrives, a file appears in `.prompt-queue/` and a notification pops up with **Open File** / **Reveal in Explorer** actions.
+When the time arrives, a file appears in `.prompt-queue/` and a notification pops up.
 
 ### 3. Configure API Keys (optional, for accurate usage data)
 
@@ -59,19 +73,13 @@ Keys are stored in VS Code **SecretStorage** — never written to `settings.json
 1. Get an **organization admin key** from [platform.openai.com/account/api-keys](https://platform.openai.com/account/api-keys).
    *(Standard project keys `sk-proj-…` cannot access the usage endpoint.)*
 2. Run: **Usage: Set OpenAI API Key (Secret)** from the Command Palette.
-3. Paste your key → Enter.
-4. Optionally set `openai.orgId` and `openai.projectId` in Settings.
+3. Optionally set `openai.orgId` and `openai.projectId` in Settings.
 
 #### Anthropic
 
 1. Get an **admin API key** from [console.anthropic.com](https://console.anthropic.com).
 2. Run: **Usage: Set Anthropic Admin API Key (Secret)**.
-3. Paste your key → Enter.
-4. If your org requires it, set `anthropic.orgId` in Settings.
-
-#### Verify
-
-Run **Usage: Refresh** — the Usage Monitor panel updates with live data.
+3. If your org requires it, set `anthropic.orgId` in Settings.
 
 ---
 
@@ -79,9 +87,10 @@ Run **Usage: Refresh** — the Usage Monitor panel updates with live data.
 
 | Command | Description |
 |---|---|
-| `PromptQueue: Queue Prompt (Send Later)` | Queue from selection or input |
+| `PromptQueue: Queue Prompt (Send Later)` | Queue from selection or input box |
 | `PromptQueue: Queue From Clipboard` | Queue current clipboard content |
 | `PromptQueue: Queue From Current Editor` | Queue entire file (or selection) |
+| `PromptQueue: I'm Rate Limited — Queue for Later` | Smart flow: auto-detects reset time from clipboard/editor |
 | `PromptQueue: Process Queue Now` | Force-process all due items immediately |
 | `Usage: Refresh` | Fetch latest usage from all providers |
 | `Usage: Show Summary` | Show usage summary in a side panel |
@@ -89,22 +98,23 @@ Run **Usage: Refresh** — the Usage Monitor panel updates with live data.
 | `Usage: Set Anthropic Admin API Key (Secret)` | Store Anthropic key in SecretStorage |
 | `Usage: Clear OpenAI API Key` | Remove OpenAI key |
 | `Usage: Clear Anthropic Admin API Key` | Remove Anthropic key |
+| `Usage: Calibrate Limits from claude.ai %` | Set token limits from your claude.ai usage percentage |
 
 ---
 
 ## Configuration
 
-All settings are under the `promptQueue` and `usage` namespaces (VS Code Settings UI or `settings.json`):
-
 | Setting | Default | Description |
 |---|---|---|
-| `promptQueue.defaultDelayHours` | `5` | Default delivery delay (hours) |
+| `promptQueue.defaultDelayMinutes` | `30` | Default delivery delay (minutes) |
 | `promptQueue.outputDir` | `.prompt-queue` | Workspace-relative output directory |
 | `promptQueue.filenameTemplate` | `{timestamp}_{id}.md` | Filename template (`{timestamp}` = `YYYYMMDD_HHMM`, `{id}` = 8-char hex) |
 | `openai.orgId` | `` | OpenAI Organization ID (optional) |
 | `openai.projectId` | `` | OpenAI Project ID (optional) |
 | `anthropic.orgId` | `` | Anthropic Org/Workspace ID (optional) |
 | `usage.refreshIntervalMinutes` | `10` | Auto-refresh interval; `0` = disabled |
+| `claude.tokenLimit5h` | `0` | Claude token limit for the 5-hour window (set via Calibrate command) |
+| `claude.tokenLimitWeekly` | `0` | Claude token limit for the weekly window (set via Calibrate command) |
 
 ---
 
@@ -130,11 +140,10 @@ If VS Code is closed when the time arrives, the item is processed on the **next 
 
 | Provider | Source | Keys needed |
 |---|---|---|
+| Claude Local | `~/.claude/history.jsonl` | None |
 | OpenAI | `GET /v1/usage?date=…` (hourly buckets) | Org admin key |
 | Anthropic | `GET /v1/organizations/{id}/usage` | Admin API key |
 | Local Estimate | Queued prompts in store, ≈ chars/4 | None |
-
-Data may lag by a few minutes (noted in the UI). The extension aggregates the last 5 hours and last 7 days of tokens.
 
 ---
 
@@ -144,15 +153,6 @@ Data may lag by a few minutes (noted in the UI). The extension aggregates the la
 - **No telemetry** — this extension collects nothing.
 - **No hard-coded credentials**.
 - Network requests go only to `api.openai.com` and `api.anthropic.com` (when keys are configured).
-
----
-
-## Limitations (V1)
-
-- Rate-limit detection is **not automatic** — the extension does not intercept Claude Code / Codex traffic. Use the clipboard/editor queue commands manually.
-- The `openai.adminApiKey` must be an **organization admin key**, not a standard project key.
-- The Anthropic usage endpoint path (`/v1/organizations/{orgId}/usage`) may change as the Admin API evolves. Check [Anthropic docs](https://docs.anthropic.com/en/api/admin-api) if you get 404 errors.
-- The usage monitor shows **approximate** data for queued prompts only (local estimate) when no API keys are set.
 
 ---
 
@@ -167,7 +167,7 @@ npm run watch
 
 # Press F5 in VS Code to launch Extension Development Host
 
-# Run unit tests (no VS Code instance needed for time/queue tests)
+# Run unit tests
 npm test
 
 # Package as VSIX
@@ -178,23 +178,25 @@ npm run package
 
 ```
 src/
-  extension.ts           ← Activation, command wiring
+  extension.ts               ← Activation, command wiring
   queue/
-    QueueStore.ts        ← Persistent queue (globalState)
-    QueueProcessor.ts    ← Timer + file delivery
+    QueueStore.ts            ← Persistent queue (globalState)
+    QueueProcessor.ts        ← Timer + file delivery
   usage/
-    IUsageProvider.ts    ← Interface + types
+    IUsageProvider.ts        ← Interface + types
+    ClaudeLocalProvider.ts   ← ~/.claude/history.jsonl reader
     OpenAIUsageProvider.ts
     AnthropicUsageProvider.ts
     LocalEstimateProvider.ts
-    UsageService.ts      ← Aggregation + caching
+    UsageService.ts          ← Aggregation + caching
   ui/
-    UsageViewProvider.ts ← TreeView for usage
-    QueueViewProvider.ts ← TreeView for queue items
+    UsageWebviewProvider.ts  ← Usage Monitor panel
+    QueueWebviewProvider.ts  ← Prompt Queue panel (delay / at-time modes)
+    ClaudeCommandsWebviewProvider.ts ← Claude Commands browser
   util/
-    time.ts              ← Pure time helpers
-    crypto.ts            ← ID generation
-    fs.ts                ← workspace.fs helpers
+    time.ts                  ← Pure time helpers + rate-limit parser
+    crypto.ts                ← ID generation
+    fs.ts                    ← workspace.fs helpers
   test/
     runTest.ts
     suite/

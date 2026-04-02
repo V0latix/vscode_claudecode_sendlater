@@ -10,6 +10,7 @@ import { AnthropicUsageProvider } from "./usage/AnthropicUsageProvider";
 import { UsageService } from "./usage/UsageService";
 import { UsageWebviewProvider } from "./ui/UsageWebviewProvider";
 import { QueueWebviewProvider } from "./ui/QueueWebviewProvider";
+import { ClaudeCommandsWebviewProvider } from "./ui/ClaudeCommandsWebviewProvider";
 import { generateShortId } from "./util/crypto";
 import {
   addHours,
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Views ───────────────────────────────────────────────────────────────────
   const usageWebviewProvider = new UsageWebviewProvider(usageService);
   const queueWebviewProvider = new QueueWebviewProvider(store, processor, log);
+  const claudeCommandsProvider = new ClaudeCommandsWebviewProvider();
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -52,6 +54,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(
       QueueWebviewProvider.viewType,
       queueWebviewProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+    vscode.window.registerWebviewViewProvider(
+      ClaudeCommandsWebviewProvider.viewType,
+      claudeCommandsProvider,
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
   );

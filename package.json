@@ -2,7 +2,7 @@
   "name": "prompt-queue-usage-monitor",
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "v0latix",
   "license": "MIT",
   "repository": {
@@ -12,10 +12,23 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
-  "keywords": ["claude", "openai", "codex", "prompt", "queue", "rate-limit", "usage", "tokens"],
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "openai",
+    "codex",
+    "prompt",
+    "queue",
+    "rate-limit",
+    "usage",
+    "tokens"
+  ],
   "icon": "media/icon.png",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -155,6 +168,11 @@
           "id": "promptQueueView",
           "name": "Prompt Queue",
           "type": "webview"
+        },
+        {
+          "id": "claudeCommandsView",
+          "name": "Claude Commands",
+          "type": "webview"
         }
       ]
     },
@@ -167,18 +185,42 @@
         }
       ],
       "commandPalette": [
-        { "command": "usage.refresh" },
-        { "command": "usage.showSummary" },
-        { "command": "usage.setOpenAIKey" },
-        { "command": "usage.setAnthropicKey" },
-        { "command": "usage.clearOpenAIKey" },
-        { "command": "usage.clearAnthropicKey" },
-        { "command": "usage.setLimits" },
-        { "command": "promptQueue.queuePrompt" },
-        { "command": "promptQueue.queueFromClipboard" },
-        { "command": "promptQueue.queueFromEditor" },
-        { "command": "promptQueue.imRateLimited" },
-        { "command": "promptQueue.processNow" }
+        {
+          "command": "usage.refresh"
+        },
+        {
+          "command": "usage.showSummary"
+        },
+        {
+          "command": "usage.setOpenAIKey"
+        },
+        {
+          "command": "usage.setAnthropicKey"
+        },
+        {
+          "command": "usage.clearOpenAIKey"
+        },
+        {
+          "command": "usage.clearAnthropicKey"
+        },
+        {
+          "command": "usage.setLimits"
+        },
+        {
+          "command": "promptQueue.queuePrompt"
+        },
+        {
+          "command": "promptQueue.queueFromClipboard"
+        },
+        {
+          "command": "promptQueue.queueFromEditor"
+        },
+        {
+          "command": "promptQueue.imRateLimited"
+        },
+        {
+          "command": "promptQueue.processNow"
+        }
       ]
     }
   },
