@@ -1,22 +1,29 @@
 /**
  * Extension entry point — Prompt Queue + Usage Monitor
  */
-import * as vscode from 'vscode';
-import { QueueStore } from './queue/QueueStore';
-import { QueueProcessor } from './queue/QueueProcessor';
-import { ClaudeLocalProvider } from './usage/ClaudeLocalProvider';
-import { OpenAIUsageProvider } from './usage/OpenAIUsageProvider';
-import { AnthropicUsageProvider } from './usage/AnthropicUsageProvider';
-import { UsageService } from './usage/UsageService';
-import { UsageWebviewProvider } from './ui/UsageWebviewProvider';
-import { QueueWebviewProvider } from './ui/QueueWebviewProvider';
-import { generateShortId } from './util/crypto';
-import { addHours, addMinutes, formatDisplayTime, parseRateLimitDelay, parseRateLimitMessage, RateLimitInfo } from './util/time';
+import * as vscode from "vscode";
+import { QueueStore } from "./queue/QueueStore";
+import { QueueProcessor } from "./queue/QueueProcessor";
+import { ClaudeLocalProvider } from "./usage/ClaudeLocalProvider";
+import { OpenAIUsageProvider } from "./usage/OpenAIUsageProvider";
+import { AnthropicUsageProvider } from "./usage/AnthropicUsageProvider";
+import { UsageService } from "./usage/UsageService";
+import { UsageWebviewProvider } from "./ui/UsageWebviewProvider";
+import { QueueWebviewProvider } from "./ui/QueueWebviewProvider";
+import { generateShortId } from "./util/crypto";
+import {
+  addHours,
+  addMinutes,
+  formatDisplayTime,
+  parseRateLimitDelay,
+  parseRateLimitMessage,
+  RateLimitInfo,
+} from "./util/time";
 
 export function activate(context: vscode.ExtensionContext): void {
   // ── Output channel ─────────────────────────────────────────────────────────
-  const log = vscode.window.createOutputChannel('PromptQueue');
-  log.appendLine('[Extension] Activating Prompt Queue + Usage Monitor…');
+  const log = vscode.window.createOutputChannel("PromptQueue");
+  log.appendLine("[Extension] Activating Prompt Queue + Usage Monitor…");
   context.subscriptions.push(log);
 
   // ── Queue ──────────────────────────────────────────────────────────────────
@@ -29,7 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const anthropicProvider = new AnthropicUsageProvider(context.secrets, log);
   const usageService = new UsageService(
     [claudeLocalProvider, openaiProvider, anthropicProvider],
-    log
+    log,
   );
 
   // ── Views ───────────────────────────────────────────────────────────────────
@@ -40,13 +47,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(
       UsageWebviewProvider.viewType,
       usageWebviewProvider,
-      { webviewOptions: { retainContextWhenHidden: true } }
+      { webviewOptions: { retainContextWhenHidden: true } },
     ),
     vscode.window.registerWebviewViewProvider(
       QueueWebviewProvider.viewType,
       queueWebviewProvider,
-      { webviewOptions: { retainContextWhenHidden: true } }
-    )
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
   );
 
   // ── Commands — Queue ───────────────────────────────────────────────────────
@@ -57,30 +64,35 @@ export function activate(context: vscode.ExtensionContext): void {
    * 2. Ask for delay.
    * 3. Enqueue.
    */
-  const cmdQueuePrompt = vscode.commands.registerCommand('promptQueue.queuePrompt', async () => {
-    const promptText = await getPromptText('Enter the prompt to queue:');
-    if (!promptText) { return; }
-    await enqueuePrompt(promptText);
-  });
+  const cmdQueuePrompt = vscode.commands.registerCommand(
+    "promptQueue.queuePrompt",
+    async () => {
+      const promptText = await getPromptText("Enter the prompt to queue:");
+      if (!promptText) {
+        return;
+      }
+      await enqueuePrompt(promptText);
+    },
+  );
 
   const cmdQueueFromClipboard = vscode.commands.registerCommand(
-    'promptQueue.queueFromClipboard',
+    "promptQueue.queueFromClipboard",
     async () => {
       const text = await vscode.env.clipboard.readText();
       if (!text.trim()) {
-        vscode.window.showWarningMessage('Clipboard is empty.');
+        vscode.window.showWarningMessage("Clipboard is empty.");
         return;
       }
       await enqueuePrompt(text);
-    }
+    },
   );
 
   const cmdQueueFromEditor = vscode.commands.registerCommand(
-    'promptQueue.queueFromEditor',
+    "promptQueue.queueFromEditor",
     async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('No active editor.');
+        vscode.window.showWarningMessage("No active editor.");
         return;
       }
       const selection = editor.selection;
@@ -88,18 +100,21 @@ export function activate(context: vscode.ExtensionContext): void {
         ? editor.document.getText()
         : editor.document.getText(selection);
       if (!text.trim()) {
-        vscode.window.showWarningMessage('Editor / selection is empty.');
+        vscode.window.showWarningMessage("Editor / selection is empty.");
         return;
       }
       await enqueuePrompt(text);
-    }
+    },
   );
 
-  const cmdProcessNow = vscode.commands.registerCommand('promptQueue.processNow', async () => {
-    await processor.process();
-    queueWebviewProvider.refresh();
-    vscode.window.showInformationMessage('PromptQueue: Queue processed.');
-  });
+  const cmdProcessNow = vscode.commands.registerCommand(
+    "promptQueue.processNow",
+    async () => {
+      await processor.process();
+      queueWebviewProvider.refresh();
+      vscode.window.showInformationMessage("PromptQueue: Queue processed.");
+    },
+  );
 
   /**
    * "I'm Rate Limited" — the primary entry point when hitting a rate limit.
@@ -111,212 +126,281 @@ export function activate(context: vscode.ExtensionContext): void {
    *  4. Ask for prompt text
    *  5. Queue with computed delay
    */
-  const cmdImRateLimited = vscode.commands.registerCommand('promptQueue.imRateLimited', async () => {
-    // ── Step 1: try clipboard ──────────────────────────────────────────────
-    let rateLimitInfo: RateLimitInfo | undefined;
-    let sourceLabel = '';
+  const cmdImRateLimited = vscode.commands.registerCommand(
+    "promptQueue.imRateLimited",
+    async () => {
+      // ── Step 1: try clipboard ──────────────────────────────────────────────
+      let rateLimitInfo: RateLimitInfo | undefined;
+      let sourceLabel = "";
 
-    try {
-      const clip = await vscode.env.clipboard.readText();
-      if (clip.trim()) {
-        rateLimitInfo = parseRateLimitMessage(clip);
-        if (rateLimitInfo) { sourceLabel = 'clipboard'; }
+      try {
+        const clip = await vscode.env.clipboard.readText();
+        if (clip.trim()) {
+          rateLimitInfo = parseRateLimitMessage(clip);
+          if (rateLimitInfo) {
+            sourceLabel = "clipboard";
+          }
+        }
+      } catch {
+        /* ignore clipboard errors */
       }
-    } catch { /* ignore clipboard errors */ }
 
-    // ── Step 2: also check active editor selection ─────────────────────────
-    if (!rateLimitInfo) {
-      const editor = vscode.window.activeTextEditor;
-      if (editor && !editor.selection.isEmpty) {
-        const sel = editor.document.getText(editor.selection);
-        rateLimitInfo = parseRateLimitMessage(sel);
-        if (rateLimitInfo) { sourceLabel = 'editor selection'; }
-      }
-    }
-
-    // ── Step 3: if nothing found → ask user to paste the message ──────────
-    if (!rateLimitInfo) {
-      const pasted = await vscode.window.showInputBox({
-        title: 'Rate Limit — Paste the error message',
-        prompt:
-          'Copy the rate-limit error from Claude Code or Copilot, then paste it here.\n' +
-          'Examples: "try again in 4h 30m" · "resets at 14:30" · "retry after 45 minutes"',
-        placeHolder: 'Paste error message here…',
-        ignoreFocusOut: true,
-      });
-
-      if (!pasted) { return; } // user cancelled
-
-      rateLimitInfo = parseRateLimitMessage(pasted);
-      sourceLabel = 'pasted message';
-
+      // ── Step 2: also check active editor selection ─────────────────────────
       if (!rateLimitInfo) {
-        // Fallback: ask for manual delay
-        const manualStr = await vscode.window.showInputBox({
-          title: 'Rate Limit — Manual delay',
-          prompt: 'Could not detect a reset time. Enter the delay manually (minutes):',
-          value: '30',
-          validateInput: v => (isNaN(parseFloat(v)) || parseFloat(v) <= 0 ? 'Positive number required' : null),
+        const editor = vscode.window.activeTextEditor;
+        if (editor && !editor.selection.isEmpty) {
+          const sel = editor.document.getText(editor.selection);
+          rateLimitInfo = parseRateLimitMessage(sel);
+          if (rateLimitInfo) {
+            sourceLabel = "editor selection";
+          }
+        }
+      }
+
+      // ── Step 3: if nothing found → ask user to paste the message ──────────
+      if (!rateLimitInfo) {
+        const pasted = await vscode.window.showInputBox({
+          title: "Rate Limit — Paste the error message",
+          prompt:
+            "Copy the rate-limit error from Claude Code or Copilot, then paste it here.\n" +
+            'Examples: "try again in 4h 30m" · "resets at 14:30" · "retry after 45 minutes"',
+          placeHolder: "Paste error message here…",
           ignoreFocusOut: true,
         });
-        if (!manualStr) { return; }
-        const h = parseFloat(manualStr) / 60;
-        rateLimitInfo = {
-          delayHours: h,
-          resetAt: new Date(Date.now() + h * 3_600_000),
-          rawMatch: manualStr,
-          confidence: 'low',
-        };
-        sourceLabel = 'manual input';
+
+        if (!pasted) {
+          return;
+        } // user cancelled
+
+        rateLimitInfo = parseRateLimitMessage(pasted);
+        sourceLabel = "pasted message";
+
+        if (!rateLimitInfo) {
+          // Fallback: ask for manual delay
+          const manualStr = await vscode.window.showInputBox({
+            title: "Rate Limit — Manual delay",
+            prompt:
+              "Could not detect a reset time. Enter the delay manually (minutes):",
+            value: "30",
+            validateInput: (v) =>
+              isNaN(parseFloat(v)) || parseFloat(v) <= 0
+                ? "Positive number required"
+                : null,
+            ignoreFocusOut: true,
+          });
+          if (!manualStr) {
+            return;
+          }
+          const h = parseFloat(manualStr) / 60;
+          rateLimitInfo = {
+            delayHours: h,
+            resetAt: new Date(Date.now() + h * 3_600_000),
+            rawMatch: manualStr,
+            confidence: "low",
+          };
+          sourceLabel = "manual input";
+        }
       }
-    }
 
-    // ── Step 4: show parsed result and let user confirm / adjust ──────────
-    const { delayHours, resetAt, confidence } = rateLimitInfo;
-    const resetLabel = resetAt ? formatDisplayTime(resetAt) : `in ${delayHours}h`;
-    const confidenceTag = confidence === 'high' ? '' : ` (${confidence} confidence)`;
+      // ── Step 4: show parsed result and let user confirm / adjust ──────────
+      const { delayHours, resetAt, confidence } = rateLimitInfo;
+      const resetLabel = resetAt
+        ? formatDisplayTime(resetAt)
+        : `in ${delayHours}h`;
+      const confidenceTag =
+        confidence === "high" ? "" : ` (${confidence} confidence)`;
 
-    const confirmItems: vscode.QuickPickItem[] = [
-      {
-        label: `$(clock) Queue for ${resetLabel}${confidenceTag}`,
-        description: `Detected from ${sourceLabel} — delay: ${Math.round(delayHours * 60)}min`,
-        detail: `Your prompt will be delivered as a .md file at ${resetLabel}`,
-      },
-      {
-        label: '$(edit) Change delay',
-        description: 'Override the detected delay',
-      },
-      {
-        label: '$(close) Cancel',
-      },
-    ];
+      const confirmItems: vscode.QuickPickItem[] = [
+        {
+          label: `$(clock) Queue for ${resetLabel}${confidenceTag}`,
+          description: `Detected from ${sourceLabel} — delay: ${Math.round(delayHours * 60)}min`,
+          detail: `Your prompt will be delivered as a .md file at ${resetLabel}`,
+        },
+        {
+          label: "$(edit) Change delay",
+          description: "Override the detected delay",
+        },
+        {
+          label: "$(close) Cancel",
+        },
+      ];
 
-    const picked = await vscode.window.showQuickPick(confirmItems, {
-      title: '⏰ Rate Limit Detected',
-      placeHolder: 'Confirm the queuing delay',
-      ignoreFocusOut: true,
-    });
-
-    if (!picked || picked.label.includes('Cancel')) { return; }
-
-    let finalDelay = delayHours;
-
-    if (picked.label.includes('Change delay')) {
-      const overrideStr = await vscode.window.showInputBox({
-        title: 'Override delay (minutes)',
-        value: String(Math.round(delayHours * 60)),
-        validateInput: v => (isNaN(parseFloat(v)) || parseFloat(v) <= 0 ? 'Positive number required' : null),
+      const picked = await vscode.window.showQuickPick(confirmItems, {
+        title: "⏰ Rate Limit Detected",
+        placeHolder: "Confirm the queuing delay",
         ignoreFocusOut: true,
       });
-      if (!overrideStr) { return; }
-      finalDelay = parseFloat(overrideStr) / 60;
-    }
 
-    // ── Step 5: get prompt text ────────────────────────────────────────────
-    const promptText = await getRateLimitedPromptText();
-    if (!promptText) { return; }
+      if (!picked || picked.label.includes("Cancel")) {
+        return;
+      }
 
-    // ── Step 6: queue ──────────────────────────────────────────────────────
-    const now = new Date();
-    const notBefore = addHours(now, finalDelay);
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+      let finalDelay = delayHours;
 
-    const item = {
-      id: generateShortId(),
-      createdAt: now.toISOString(),
-      notBefore: notBefore.toISOString(),
-      promptText,
-      workspaceFolder,
-      processed: false,
-      targetTerminalName: vscode.window.activeTerminal?.name,
-    };
+      if (picked.label.includes("Change delay")) {
+        const overrideStr = await vscode.window.showInputBox({
+          title: "Override delay (minutes)",
+          value: String(Math.round(delayHours * 60)),
+          validateInput: (v) =>
+            isNaN(parseFloat(v)) || parseFloat(v) <= 0
+              ? "Positive number required"
+              : null,
+          ignoreFocusOut: true,
+        });
+        if (!overrideStr) {
+          return;
+        }
+        finalDelay = parseFloat(overrideStr) / 60;
+      }
 
-    await store.add(item);
-    queueWebviewProvider.refresh();
+      // ── Step 5: get prompt text ────────────────────────────────────────────
+      const promptText = await getRateLimitedPromptText();
+      if (!promptText) {
+        return;
+      }
 
-    const resetStr = formatDisplayTime(notBefore);
-    log.appendLine(`[Extension] Rate-limited queue: ${item.id} notBefore=${item.notBefore}`);
-    vscode.window.showInformationMessage(
-      `⏰ PromptQueue: Prompt queued — will be delivered at ${resetStr}  [id: ${item.id}]`
-    );
-  });
+      // ── Step 6: queue ──────────────────────────────────────────────────────
+      const now = new Date();
+      const notBefore = addHours(now, finalDelay);
+      const workspaceFolder =
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+
+      const item = {
+        id: generateShortId(),
+        createdAt: now.toISOString(),
+        notBefore: notBefore.toISOString(),
+        promptText,
+        workspaceFolder,
+        processed: false,
+        targetTerminalName: vscode.window.activeTerminal?.name,
+      };
+
+      await store.add(item);
+      queueWebviewProvider.refresh();
+
+      const resetStr = formatDisplayTime(notBefore);
+      log.appendLine(
+        `[Extension] Rate-limited queue: ${item.id} notBefore=${item.notBefore}`,
+      );
+      vscode.window.showInformationMessage(
+        `⏰ PromptQueue: Prompt queued — will be delivered at ${resetStr}  [id: ${item.id}]`,
+      );
+    },
+  );
 
   // ── Commands — Usage ───────────────────────────────────────────────────────
 
-  const cmdRefreshUsage = vscode.commands.registerCommand('usage.refresh', async () => {
-    await usageService.refresh();
-  });
+  const cmdRefreshUsage = vscode.commands.registerCommand(
+    "usage.refresh",
+    async () => {
+      await usageService.refresh();
+    },
+  );
 
-  const cmdSetLimits = vscode.commands.registerCommand('usage.setLimits', () => {
-    usageWebviewProvider.promptSetLimits();
-  });
+  const cmdSetLimits = vscode.commands.registerCommand(
+    "usage.setLimits",
+    () => {
+      usageWebviewProvider.promptSetLimits();
+    },
+  );
 
-  const cmdShowSummary = vscode.commands.registerCommand('usage.showSummary', async () => {
-    const data = usageService.getCached();
-    if (!data) {
-      vscode.window.showInformationMessage('No usage data yet. Run "Usage: Refresh" first.');
-      return;
-    }
+  const cmdShowSummary = vscode.commands.registerCommand(
+    "usage.showSummary",
+    async () => {
+      const data = usageService.getCached();
+      if (!data) {
+        vscode.window.showInformationMessage(
+          'No usage data yet. Run "Usage: Refresh" first.',
+        );
+        return;
+      }
 
-    const lines: string[] = [
-      `**Token Usage Summary**`,
-      ``,
-      `- Last 5 hours: **${fmtNum(data.bestTokensLast5h)}** tokens`,
-      `- Last 7 days:  **${fmtNum(data.bestTokensLast7d)}** tokens`,
-      ``,
-      `**Providers:**`,
-    ];
-    for (const p of data.providers) {
-      const status = p.usage.error ? `⚠ ${p.usage.error.slice(0, 80)}` : '✓ OK';
-      lines.push(`- ${p.name}: ${status}`);
-    }
-    if (data.lastRefreshed) {
-      lines.push(``, `_Last refreshed: ${formatDisplayTime(data.lastRefreshed)}_`);
-    }
+      const lines: string[] = [
+        `**Token Usage Summary**`,
+        ``,
+        `- Last 5 hours: **${fmtNum(data.bestTokensLast5h)}** tokens`,
+        `- Last 7 days:  **${fmtNum(data.bestTokensLast7d)}** tokens`,
+        ``,
+        `**Providers:**`,
+      ];
+      for (const p of data.providers) {
+        const status = p.usage.error
+          ? `⚠ ${p.usage.error.slice(0, 80)}`
+          : "✓ OK";
+        lines.push(`- ${p.name}: ${status}`);
+      }
+      if (data.lastRefreshed) {
+        lines.push(
+          ``,
+          `_Last refreshed: ${formatDisplayTime(data.lastRefreshed)}_`,
+        );
+      }
 
-    const panel = vscode.window.createWebviewPanel(
-      'usageSummary',
-      'Usage Summary',
-      vscode.ViewColumn.Beside,
-      {}
-    );
-    panel.webview.html = markdownToHtml(lines.join('\n'));
-    context.subscriptions.push(panel);
-  });
+      const panel = vscode.window.createWebviewPanel(
+        "usageSummary",
+        "Usage Summary",
+        vscode.ViewColumn.Beside,
+        {},
+      );
+      panel.webview.html = markdownToHtml(lines.join("\n"));
+      context.subscriptions.push(panel);
+    },
+  );
 
-  const cmdSetOpenAIKey = vscode.commands.registerCommand('usage.setOpenAIKey', async () => {
-    const key = await vscode.window.showInputBox({
-      prompt: 'Paste your OpenAI admin API key (sk-org-… or sk-…). Stored in SecretStorage.',
-      password: true,
-      placeHolder: 'sk-org-…',
-      ignoreFocusOut: true,
-    });
-    if (!key) { return; }
-    await OpenAIUsageProvider.setKey(context.secrets, key.trim());
-    vscode.window.showInformationMessage('OpenAI API key saved. Run "Usage: Refresh" to fetch data.');
-  });
+  const cmdSetOpenAIKey = vscode.commands.registerCommand(
+    "usage.setOpenAIKey",
+    async () => {
+      const key = await vscode.window.showInputBox({
+        prompt:
+          "Paste your OpenAI admin API key (sk-org-… or sk-…). Stored in SecretStorage.",
+        password: true,
+        placeHolder: "sk-org-…",
+        ignoreFocusOut: true,
+      });
+      if (!key) {
+        return;
+      }
+      await OpenAIUsageProvider.setKey(context.secrets, key.trim());
+      vscode.window.showInformationMessage(
+        'OpenAI API key saved. Run "Usage: Refresh" to fetch data.',
+      );
+    },
+  );
 
-  const cmdSetAnthropicKey = vscode.commands.registerCommand('usage.setAnthropicKey', async () => {
-    const key = await vscode.window.showInputBox({
-      prompt: 'Paste your Anthropic admin API key. Stored in SecretStorage.',
-      password: true,
-      placeHolder: 'sk-ant-admin-…',
-      ignoreFocusOut: true,
-    });
-    if (!key) { return; }
-    await AnthropicUsageProvider.setKey(context.secrets, key.trim());
-    vscode.window.showInformationMessage('Anthropic admin key saved. Run "Usage: Refresh" to fetch data.');
-  });
+  const cmdSetAnthropicKey = vscode.commands.registerCommand(
+    "usage.setAnthropicKey",
+    async () => {
+      const key = await vscode.window.showInputBox({
+        prompt: "Paste your Anthropic admin API key. Stored in SecretStorage.",
+        password: true,
+        placeHolder: "sk-ant-admin-…",
+        ignoreFocusOut: true,
+      });
+      if (!key) {
+        return;
+      }
+      await AnthropicUsageProvider.setKey(context.secrets, key.trim());
+      vscode.window.showInformationMessage(
+        'Anthropic admin key saved. Run "Usage: Refresh" to fetch data.',
+      );
+    },
+  );
 
-  const cmdClearOpenAIKey = vscode.commands.registerCommand('usage.clearOpenAIKey', async () => {
-    await OpenAIUsageProvider.clearKey(context.secrets);
-    vscode.window.showInformationMessage('OpenAI API key cleared.');
-  });
+  const cmdClearOpenAIKey = vscode.commands.registerCommand(
+    "usage.clearOpenAIKey",
+    async () => {
+      await OpenAIUsageProvider.clearKey(context.secrets);
+      vscode.window.showInformationMessage("OpenAI API key cleared.");
+    },
+  );
 
-  const cmdClearAnthropicKey = vscode.commands.registerCommand('usage.clearAnthropicKey', async () => {
-    await AnthropicUsageProvider.clearKey(context.secrets);
-    vscode.window.showInformationMessage('Anthropic admin key cleared.');
-  });
+  const cmdClearAnthropicKey = vscode.commands.registerCommand(
+    "usage.clearAnthropicKey",
+    async () => {
+      await AnthropicUsageProvider.clearKey(context.secrets);
+      vscode.window.showInformationMessage("Anthropic admin key cleared.");
+    },
+  );
 
   // ── Register everything ────────────────────────────────────────────────────
   context.subscriptions.push(
@@ -339,23 +423,33 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Also trigger processing when VS Code window gains focus (handles wake-from-sleep).
   context.subscriptions.push(
-    vscode.window.onDidChangeWindowState(state => {
+    vscode.window.onDidChangeWindowState((state) => {
       if (state.focused) {
-        processor.process().catch(err =>
-          log.appendLine(`[Extension] Process-on-focus error: ${err}`)
-        );
+        processor
+          .process()
+          .catch((err) =>
+            log.appendLine(`[Extension] Process-on-focus error: ${err}`),
+          );
       }
-    })
+    }),
   );
 
-  const config = vscode.workspace.getConfiguration('usage');
-  const refreshInterval: number = config.get('refreshIntervalMinutes', 10);
+  const config = vscode.workspace.getConfiguration("usage");
+  const refreshInterval: number = config.get("refreshIntervalMinutes", 10);
   usageService.start(refreshInterval);
 
   // Initial processing pass + usage refresh (deferred slightly)
   setTimeout(() => {
-    processor.process().catch(err => log.appendLine(`[Extension] Initial process error: ${err}`));
-    usageService.refresh().catch(err => log.appendLine(`[Extension] Initial usage refresh error: ${err}`));
+    processor
+      .process()
+      .catch((err) =>
+        log.appendLine(`[Extension] Initial process error: ${err}`),
+      );
+    usageService
+      .refresh()
+      .catch((err) =>
+        log.appendLine(`[Extension] Initial usage refresh error: ${err}`),
+      );
   }, 2000);
 
   context.subscriptions.push({
@@ -365,7 +459,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   });
 
-  log.appendLine('[Extension] Activated.');
+  log.appendLine("[Extension] Activated.");
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -382,47 +476,52 @@ export function activate(context: vscode.ExtensionContext): void {
 
     if (hasSelection) {
       sources.push({
-        label: '$(selection) Use current editor selection',
+        label: "$(selection) Use current editor selection",
         description: `${editor.document.getText(editor.selection).slice(0, 60)}…`,
       });
     }
     if (hasEditorContent && !hasSelection) {
       sources.push({
-        label: '$(file-text) Use entire current file',
-        description: editor.document.fileName.split('/').pop(),
+        label: "$(file-text) Use entire current file",
+        description: editor.document.fileName.split("/").pop(),
       });
     }
     sources.push(
-      { label: '$(clippy) Paste from clipboard', description: 'Use whatever is in your clipboard' },
-      { label: '$(edit) Type a prompt now', description: 'Open an input box' },
+      {
+        label: "$(clippy) Paste from clipboard",
+        description: "Use whatever is in your clipboard",
+      },
+      { label: "$(edit) Type a prompt now", description: "Open an input box" },
     );
 
     const pick = await vscode.window.showQuickPick(sources, {
-      title: 'What prompt do you want to queue?',
-      placeHolder: 'Choose the source for your prompt',
+      title: "What prompt do you want to queue?",
+      placeHolder: "Choose the source for your prompt",
       ignoreFocusOut: true,
     });
 
-    if (!pick) { return undefined; }
+    if (!pick) {
+      return undefined;
+    }
 
-    if (pick.label.includes('selection')) {
+    if (pick.label.includes("selection")) {
       return editor!.document.getText(editor!.selection);
     }
-    if (pick.label.includes('entire current file')) {
+    if (pick.label.includes("entire current file")) {
       return editor!.document.getText();
     }
-    if (pick.label.includes('clipboard')) {
+    if (pick.label.includes("clipboard")) {
       const clip = await vscode.env.clipboard.readText();
       if (!clip.trim()) {
-        vscode.window.showWarningMessage('Clipboard is empty.');
+        vscode.window.showWarningMessage("Clipboard is empty.");
         return undefined;
       }
       return clip;
     }
     // Type now
     return vscode.window.showInputBox({
-      title: 'Enter your prompt',
-      placeHolder: 'Type or paste your prompt here…',
+      title: "Enter your prompt",
+      placeHolder: "Type or paste your prompt here…",
       ignoreFocusOut: true,
     });
   }
@@ -432,7 +531,9 @@ export function activate(context: vscode.ExtensionContext): void {
    *   1. Active editor selection
    *   2. If no selection → show input box
    */
-  async function getPromptText(placeholder: string): Promise<string | undefined> {
+  async function getPromptText(
+    placeholder: string,
+  ): Promise<string | undefined> {
     const editor = vscode.window.activeTextEditor;
     if (editor && !editor.selection.isEmpty) {
       return editor.document.getText(editor.selection);
@@ -441,7 +542,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Show input box — for multi-line prompts user can paste
     return vscode.window.showInputBox({
       prompt: placeholder,
-      placeHolder: 'Paste or type your prompt here…',
+      placeHolder: "Paste or type your prompt here…",
       ignoreFocusOut: true,
     });
   }
@@ -450,35 +551,63 @@ export function activate(context: vscode.ExtensionContext): void {
    * Ask for delay, create queue item.
    */
   async function enqueuePrompt(promptText: string): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration('promptQueue');
-    const defaultDelayMinutes: number = cfg.get('defaultDelayMinutes', 30);
+    const cfg = vscode.workspace.getConfiguration("promptQueue");
+    const defaultDelayMinutes: number = cfg.get("defaultDelayMinutes", 30);
 
     // Try to detect rate-limit hint in clipboard / active editor
     let suggestedMinutes = defaultDelayMinutes;
     try {
       const clip = await vscode.env.clipboard.readText();
       const parsedHours = parseRateLimitDelay(clip);
-      if (parsedHours) { suggestedMinutes = Math.round(parsedHours * 60); }
-    } catch { /* ignore */ }
+      if (parsedHours) {
+        suggestedMinutes = Math.round(parsedHours * 60);
+      }
+    } catch {
+      /* ignore */
+    }
 
     const delayStr = await vscode.window.showInputBox({
-      prompt: `Delay before delivery (minutes). Detected: ${suggestedMinutes}min`,
+      prompt: `Delay in minutes (e.g. 30) or a specific time (e.g. 22:00). Detected: ${suggestedMinutes}min`,
       value: String(suggestedMinutes),
       validateInput: (v) => {
-        const n = parseFloat(v);
-        if (isNaN(n) || n < 0) { return 'Enter a positive number'; }
+        const trimmed = v.trim();
+        if (/^\d{1,2}:\d{2}$/.test(trimmed)) {
+          return null;
+        } // HH:MM format
+        const n = parseFloat(trimmed);
+        if (isNaN(n) || n < 0) {
+          return "Enter minutes (e.g. 30) or a time (e.g. 22:00)";
+        }
         return null;
       },
       ignoreFocusOut: true,
     });
 
-    if (delayStr === undefined) { return; } // User cancelled
+    if (delayStr === undefined) {
+      return;
+    } // User cancelled
 
-    const delayMinutes = parseFloat(delayStr);
     const now = new Date();
-    const notBefore = addMinutes(now, delayMinutes);
+    let notBefore: Date;
+    const timeMatch = delayStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (timeMatch) {
+      const target = new Date(now);
+      target.setHours(
+        parseInt(timeMatch[1], 10),
+        parseInt(timeMatch[2], 10),
+        0,
+        0,
+      );
+      if (target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1); // next day if time already passed
+      }
+      notBefore = target;
+    } else {
+      notBefore = addMinutes(now, parseFloat(delayStr));
+    }
 
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    const workspaceFolder =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
 
     const item = {
       id: generateShortId(),
@@ -494,7 +623,7 @@ export function activate(context: vscode.ExtensionContext): void {
     queueWebviewProvider.refresh();
 
     vscode.window.showInformationMessage(
-      `PromptQueue: Queued for ${formatDisplayTime(notBefore)}  [id: ${item.id}]`
+      `PromptQueue: Queued for ${formatDisplayTime(notBefore)}  [id: ${item.id}]`,
     );
 
     log.appendLine(`[Extension] Queued ${item.id} notBefore=${item.notBefore}`);
@@ -508,26 +637,30 @@ export function deactivate(): void {
 // ── Formatting helpers (not exported) ─────────────────────────────────────────
 
 function fmtNum(n: number): string {
-  if (n >= 1_000_000) { return `${(n / 1_000_000).toFixed(2)}M`; }
-  if (n >= 1_000) { return `${(n / 1_000).toFixed(1)}K`; }
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(2)}M`;
+  }
+  if (n >= 1_000) {
+    return `${(n / 1_000).toFixed(1)}K`;
+  }
   return n.toString();
 }
 
 function markdownToHtml(md: string): string {
   // Very minimal converter — only for the summary panel
   const escaped = md
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 
   const html = escaped
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>")
+    .replace(/^- (.+)$/gm, "<li>$1</li>")
     .replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`)
-    .replace(/\n\n/g, '<br><br>')
-    .replace(/\n/g, '<br>');
+    .replace(/\n\n/g, "<br><br>")
+    .replace(/\n/g, "<br>");
 
   return `<!DOCTYPE html>
 <html lang="en">

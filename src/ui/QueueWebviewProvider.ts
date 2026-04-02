@@ -1,31 +1,37 @@
-import * as vscode from 'vscode';
-import * as nodeCrypto from 'crypto';
-import { QueueStore, QueueItem } from '../queue/QueueStore';
-import { QueueProcessor } from '../queue/QueueProcessor';
-import { generateShortId } from '../util/crypto';
-import { addMinutes, formatDisplayTime, isOverdue, parseRateLimitMessage, RateLimitInfo } from '../util/time';
+import * as vscode from "vscode";
+import * as nodeCrypto from "crypto";
+import { QueueStore, QueueItem } from "../queue/QueueStore";
+import { QueueProcessor } from "../queue/QueueProcessor";
+import { generateShortId } from "../util/crypto";
+import {
+  addMinutes,
+  formatDisplayTime,
+  isOverdue,
+  parseRateLimitMessage,
+  RateLimitInfo,
+} from "../util/time";
 
 // ── Message types (webview → extension) ───────────────────────────────────────
 type InMsg =
-  | { type: 'ready' }
-  | { type: 'detectRateLimit' }
-  | { type: 'pasteClipboard' }
-  | { type: 'useSelection' }
-  | { type: 'queuePrompt'; promptText: string; delayMinutes: number }
-  | { type: 'deleteItem'; id: string }
-  | { type: 'processNow' }
-  | { type: 'forceSend'; id: string };
+  | { type: "ready" }
+  | { type: "detectRateLimit" }
+  | { type: "pasteClipboard" }
+  | { type: "useSelection" }
+  | { type: "queuePrompt"; promptText: string; delayMinutes: number }
+  | { type: "deleteItem"; id: string }
+  | { type: "processNow" }
+  | { type: "forceSend"; id: string };
 
 // ── Message types (extension → webview) ───────────────────────────────────────
 type OutMsg =
-  | { type: 'rateLimitDetected'; info: RateLimitInfo | null }
-  | { type: 'textLoaded'; text: string }
-  | { type: 'queueUpdated'; items: QueueItem[] }
-  | { type: 'queued' }
-  | { type: 'toast'; level: 'info' | 'warn' | 'error'; message: string };
+  | { type: "rateLimitDetected"; info: RateLimitInfo | null }
+  | { type: "textLoaded"; text: string }
+  | { type: "queueUpdated"; items: QueueItem[] }
+  | { type: "queued" }
+  | { type: "toast"; level: "info" | "warn" | "error"; message: string };
 
 export class QueueWebviewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'promptQueueView';
+  public static readonly viewType = "promptQueueView";
   private _view?: vscode.WebviewView;
 
   constructor(
@@ -44,22 +50,27 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.buildHtml();
 
     webviewView.webview.onDidReceiveMessage(async (msg: InMsg) => {
-      try { await this.handle(msg); }
-      catch (err) {
+      try {
+        await this.handle(msg);
+      } catch (err) {
         this.log.appendLine(`[QueueWebview] ${err}`);
-        this.post({ type: 'toast', level: 'error', message: String(err) });
+        this.post({ type: "toast", level: "error", message: String(err) });
       }
     });
 
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) { this.sendQueue(); }
+      if (webviewView.visible) {
+        this.sendQueue();
+      }
     });
 
     this.processor.onDidChange(() => this.sendQueue());
   }
 
   /** Force a queue-list refresh from outside (e.g. after command-palette queue). */
-  refresh(): void { this.sendQueue(); }
+  refresh(): void {
+    this.sendQueue();
+  }
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
@@ -68,45 +79,59 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private sendQueue(): void {
-    this.post({ type: 'queueUpdated', items: this.store.getAll() });
+    this.post({ type: "queueUpdated", items: this.store.getAll() });
   }
 
   private async handle(msg: InMsg): Promise<void> {
     switch (msg.type) {
-
-      case 'ready':
+      case "ready":
         this.sendQueue();
-        await this.tryDetect();   // auto-parse clipboard on first render
+        await this.tryDetect(); // auto-parse clipboard on first render
         break;
 
-      case 'detectRateLimit':
+      case "detectRateLimit":
         await this.tryDetect();
         break;
 
-      case 'pasteClipboard': {
+      case "pasteClipboard": {
         const text = await vscode.env.clipboard.readText();
         if (!text.trim()) {
-          this.post({ type: 'toast', level: 'warn', message: 'Clipboard is empty.' });
+          this.post({
+            type: "toast",
+            level: "warn",
+            message: "Clipboard is empty.",
+          });
           return;
         }
-        this.post({ type: 'textLoaded', text });
+        this.post({ type: "textLoaded", text });
         break;
       }
 
-      case 'useSelection': {
+      case "useSelection": {
         const editor = vscode.window.activeTextEditor;
         if (!editor || editor.selection.isEmpty) {
-          this.post({ type: 'toast', level: 'warn', message: 'No selection in active editor.' });
+          this.post({
+            type: "toast",
+            level: "warn",
+            message: "No selection in active editor.",
+          });
           return;
         }
-        this.post({ type: 'textLoaded', text: editor.document.getText(editor.selection) });
+        this.post({
+          type: "textLoaded",
+          text: editor.document.getText(editor.selection),
+        });
         break;
       }
 
-      case 'queuePrompt': {
+      case "queuePrompt": {
         const { promptText, delayMinutes } = msg;
         if (!promptText.trim()) {
-          this.post({ type: 'toast', level: 'warn', message: 'Prompt is empty.' });
+          this.post({
+            type: "toast",
+            level: "warn",
+            message: "Prompt is empty.",
+          });
           return;
         }
         const now = new Date();
@@ -115,37 +140,48 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
           createdAt: now.toISOString(),
           notBefore: addMinutes(now, delayMinutes).toISOString(),
           promptText,
-          workspaceFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '',
+          workspaceFolder:
+            vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "",
           processed: false,
           targetTerminalName: vscode.window.activeTerminal?.name,
         };
         await this.store.add(item);
-        this.log.appendLine(`[QueueWebview] Queued ${item.id} → ${item.notBefore}`);
-        this.post({ type: 'queued' });
+        this.log.appendLine(
+          `[QueueWebview] Queued ${item.id} → ${item.notBefore}`,
+        );
+        this.post({ type: "queued" });
         this.sendQueue();
         vscode.window.showInformationMessage(
-          `⏰ Queued for ${formatDisplayTime(new Date(item.notBefore))}  [id: ${item.id}]`
+          `⏰ Queued for ${formatDisplayTime(new Date(item.notBefore))}  [id: ${item.id}]`,
         );
         break;
       }
 
-      case 'deleteItem':
+      case "deleteItem":
         await this.store.remove(msg.id);
         this.sendQueue();
         break;
 
-      case 'processNow': {
+      case "processNow": {
         const count = await this.processor.process();
         this.sendQueue();
         if (count === 0) {
-          this.post({ type: 'toast', level: 'info', message: 'No overdue items to process.' });
+          this.post({
+            type: "toast",
+            level: "info",
+            message: "No overdue items to process.",
+          });
         } else {
-          this.post({ type: 'toast', level: 'info', message: `Sent ${count} prompt(s) to Claude.` });
+          this.post({
+            type: "toast",
+            level: "info",
+            message: `Sent ${count} prompt(s) to Claude.`,
+          });
         }
         break;
       }
 
-      case 'forceSend':
+      case "forceSend":
         await this.processor.forceDeliver(msg.id);
         this.sendQueue();
         break;
@@ -156,17 +192,17 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     try {
       const clip = await vscode.env.clipboard.readText();
       const info = clip.trim() ? parseRateLimitMessage(clip) : null;
-      this.post({ type: 'rateLimitDetected', info: info ?? null });
+      this.post({ type: "rateLimitDetected", info: info ?? null });
     } catch {
-      this.post({ type: 'rateLimitDetected', info: null });
+      this.post({ type: "rateLimitDetected", info: null });
     }
   }
 
   // ── HTML ───────────────────────────────────────────────────────────────────
 
   private buildHtml(): string {
-    const nonce = nodeCrypto.randomBytes(16).toString('base64');
-    return /* html */`<!DOCTYPE html>
+    const nonce = nodeCrypto.randomBytes(16).toString("base64");
+    return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -237,6 +273,32 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     color: var(--vscode-descriptionForeground);
   }
 
+  /* ── Mode toggle ──────────────────────────────────────────────────────── */
+  .mode-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 8px;
+    border: 1px solid var(--vscode-input-border, rgba(128,128,128,.3));
+    border-radius: 3px;
+    overflow: hidden;
+    width: fit-content;
+  }
+  .mode-btn {
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: none;
+    border-radius: 0;
+    padding: 4px 10px;
+    font-size: 0.82em;
+    cursor: pointer;
+    transition: background .1s, color .1s;
+  }
+  .mode-btn:hover { background: rgba(128,128,128,.15); }
+  .mode-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+  }
+
   /* ── Delay row ────────────────────────────────────────────────────────── */
   .delay-row {
     display: flex;
@@ -264,6 +326,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     outline: 1px solid var(--vscode-focusBorder);
     border-color: var(--vscode-focusBorder);
   }
+  .time-input { width: 90px; }
   .delivery-time {
     font-size: 0.85em;
     color: var(--vscode-textLink-foreground, #4fc1ff);
@@ -492,11 +555,23 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
 <div class="section">
   <div class="section-title">✏️ Your Prompt</div>
 
-  <div class="delay-row">
+  <div class="mode-toggle">
+    <button class="mode-btn active" id="modeDelay">In X min</button>
+    <button class="mode-btn" id="modeAt">At time</button>
+  </div>
+
+  <div class="delay-row" id="rowDelay">
     <label for="delayInput">Queue in</label>
     <input class="delay-input" type="number" id="delayInput" value="30" min="1" step="5">
     <span class="arrow">min →</span>
     <span class="delivery-time" id="deliveryTime"></span>
+  </div>
+
+  <div class="delay-row" id="rowAt" style="display:none">
+    <label for="atTimeInput">At</label>
+    <input class="delay-input time-input" type="time" id="atTimeInput" value="22:00">
+    <span class="arrow">→</span>
+    <span class="delivery-time" id="deliveryTimeAt"></span>
   </div>
 
   <div class="prompt-toolbar">
@@ -534,29 +609,39 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   const saved = vscode.getState() || {};
   let delayMinutes = saved.delayMinutes ?? 30;
   let promptText = saved.promptText ?? '';
+  let delayMode = saved.delayMode ?? 'delay'; // 'delay' | 'at'
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
-  const rlCard       = document.getElementById('rlCard');
-  const rlIcon       = document.getElementById('rlIcon');
-  const rlLabel      = document.getElementById('rlLabel');
-  const rlSub        = document.getElementById('rlSub');
-  const detectBtn    = document.getElementById('detectBtn');
-  const delayInput   = document.getElementById('delayInput');
-  const deliveryTime = document.getElementById('deliveryTime');
-  const pasteBtn     = document.getElementById('pasteBtn');
-  const selBtn       = document.getElementById('selBtn');
-  const promptInput  = document.getElementById('promptInput');
-  const tokenHint    = document.getElementById('tokenHint');
-  const queueBtn     = document.getElementById('queueBtn');
-  const pendingBadge = document.getElementById('pendingBadge');
-  const queueList    = document.getElementById('queueList');
-  const processNowBtn= document.getElementById('processNowBtn');
-  const toast        = document.getElementById('toast');
+  const rlCard        = document.getElementById('rlCard');
+  const rlIcon        = document.getElementById('rlIcon');
+  const rlLabel       = document.getElementById('rlLabel');
+  const rlSub         = document.getElementById('rlSub');
+  const detectBtn     = document.getElementById('detectBtn');
+  const modeDelayBtn  = document.getElementById('modeDelay');
+  const modeAtBtn     = document.getElementById('modeAt');
+  const rowDelay      = document.getElementById('rowDelay');
+  const rowAt         = document.getElementById('rowAt');
+  const delayInput    = document.getElementById('delayInput');
+  const deliveryTime  = document.getElementById('deliveryTime');
+  const atTimeInput   = document.getElementById('atTimeInput');
+  const deliveryTimeAt= document.getElementById('deliveryTimeAt');
+  const pasteBtn      = document.getElementById('pasteBtn');
+  const selBtn        = document.getElementById('selBtn');
+  const promptInput   = document.getElementById('promptInput');
+  const tokenHint     = document.getElementById('tokenHint');
+  const queueBtn      = document.getElementById('queueBtn');
+  const pendingBadge  = document.getElementById('pendingBadge');
+  const queueList     = document.getElementById('queueList');
+  const processNowBtn = document.getElementById('processNowBtn');
+  const toast         = document.getElementById('toast');
 
   // ── Restore persisted values ─────────────────────────────────────────────
-  delayInput.value   = delayMinutes;
-  promptInput.value  = promptText;
+  delayInput.value  = delayMinutes;
+  promptInput.value = promptText;
+  if (saved.atTime) { atTimeInput.value = saved.atTime; }
+  applyMode(delayMode);
   updateDeliveryTime();
+  updateDeliveryTimeAt();
   updateTokenHint();
   updateQueueBtn();
 
@@ -565,10 +650,18 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     vscode.postMessage({ type: 'detectRateLimit' });
   });
 
+  modeDelayBtn.addEventListener('click', () => { applyMode('delay'); persist(); });
+  modeAtBtn.addEventListener('click',    () => { applyMode('at');    persist(); });
+
   delayInput.addEventListener('input', () => {
     delayMinutes = parseFloat(delayInput.value) || 30;
     persist();
     updateDeliveryTime();
+  });
+
+  atTimeInput.addEventListener('input', () => {
+    persist();
+    updateDeliveryTimeAt();
   });
 
   pasteBtn.addEventListener('click', () => {
@@ -588,8 +681,9 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
 
   queueBtn.addEventListener('click', () => {
     const text = promptInput.value.trim();
-    const delay = parseFloat(delayInput.value) || 30;
     if (!text) { showToast('warn', 'Please enter a prompt.'); return; }
+    const delay = delayMode === 'at' ? minutesUntilTime(atTimeInput.value) : (parseFloat(delayInput.value) || 30);
+    if (delay === null) { showToast('warn', 'Invalid time.'); return; }
     queueBtn.disabled = true;
     queueBtn.textContent = 'Queuing…';
     vscode.postMessage({ type: 'queuePrompt', promptText: text, delayMinutes: delay });
@@ -606,11 +700,22 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
       case 'rateLimitDetected':
         renderRateLimit(msg.info);
         if (msg.info) {
-          // Auto-fill the delay (convert hours → minutes)
-          delayMinutes = Math.round(msg.info.delayHours * 60);
-          delayInput.value = delayMinutes;
+          if (msg.info.resetAt) {
+            // Switch to "at time" mode and fill the target time
+            const d = new Date(msg.info.resetAt);
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            atTimeInput.value = hh + ':' + mm;
+            applyMode('at');
+            updateDeliveryTimeAt();
+          } else {
+            // Fall back to minutes mode
+            delayMinutes = Math.round(msg.info.delayHours * 60);
+            delayInput.value = delayMinutes;
+            applyMode('delay');
+            updateDeliveryTime();
+          }
           persist();
-          updateDeliveryTime();
         }
         break;
 
@@ -672,12 +777,42 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
       '· ' + (info.confidence === 'high' ? 'high confidence' : info.confidence + ' confidence');
   }
 
+  // ── Mode helpers ──────────────────────────────────────────────────────────
+  function applyMode(mode) {
+    delayMode = mode;
+    const isAt = mode === 'at';
+    rowDelay.style.display = isAt ? 'none' : '';
+    rowAt.style.display    = isAt ? '' : 'none';
+    modeDelayBtn.classList.toggle('active', !isAt);
+    modeAtBtn.classList.toggle('active',    isAt);
+  }
+
+  /** Returns minutes until the given "HH:MM" string (next occurrence). */
+  function minutesUntilTime(value) {
+    if (!value) { return null; }
+    const [hh, mm] = value.split(':').map(Number);
+    if (isNaN(hh) || isNaN(mm)) { return null; }
+    const target = new Date();
+    target.setHours(hh, mm, 0, 0);
+    if (target.getTime() <= Date.now()) {
+      target.setDate(target.getDate() + 1); // next day
+    }
+    return (target.getTime() - Date.now()) / 60_000;
+  }
+
   // ── Delivery time ─────────────────────────────────────────────────────────
   function updateDeliveryTime() {
     const m = parseFloat(delayInput.value) || 0;
     if (m <= 0) { deliveryTime.textContent = ''; return; }
     const d = new Date(Date.now() + m * 60000);
     deliveryTime.textContent = formatTime(d);
+  }
+
+  function updateDeliveryTimeAt() {
+    const mins = minutesUntilTime(atTimeInput.value);
+    if (mins === null) { deliveryTimeAt.textContent = ''; return; }
+    const d = new Date(Date.now() + mins * 60_000);
+    deliveryTimeAt.textContent = formatTime(d);
   }
 
   function formatTime(d) {
@@ -784,7 +919,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   function persist() {
-    vscode.setState({ delayMinutes, promptText });
+    vscode.setState({ delayMinutes, promptText, delayMode, atTime: atTimeInput.value });
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────
