@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 export interface QueueItem {
   /** Unique identifier (8-char hex). */
@@ -17,7 +17,7 @@ export interface QueueItem {
   targetTerminalName?: string;
 }
 
-const STORAGE_KEY = 'promptQueue.items';
+const STORAGE_KEY = "promptQueue.items";
 
 /**
  * Persistent queue store backed by vscode.Memento (globalState).
@@ -37,7 +37,7 @@ export class QueueStore {
 
   /** Return only pending (not yet processed) items. */
   getPending(): QueueItem[] {
-    return this.getAll().filter(i => !i.processed);
+    return this.getAll().filter((i) => !i.processed);
   }
 
   /** Add a new item to the queue. */
@@ -49,21 +49,32 @@ export class QueueStore {
 
   /** Mark an item as processed by id. */
   async markProcessed(id: string): Promise<void> {
-    const items = this.getAll().map(i =>
-      i.id === id ? { ...i, processed: true } : i
+    const items = this.getAll().map((i) =>
+      i.id === id ? { ...i, processed: true } : i,
     );
     await this.state.update(STORAGE_KEY, items);
   }
 
   /** Remove an item entirely (e.g. user-initiated delete). */
   async remove(id: string): Promise<void> {
-    const items = this.getAll().filter(i => i.id !== id);
+    const items = this.getAll().filter((i) => i.id !== id);
     await this.state.update(STORAGE_KEY, items);
   }
 
   /** Purge all processed items (housekeeping). */
   async purgeProcessed(): Promise<void> {
-    const items = this.getAll().filter(i => !i.processed);
+    const items = this.getAll().filter((i) => !i.processed);
+    await this.state.update(STORAGE_KEY, items);
+  }
+
+  /** Update mutable fields of an existing item (promptText, notBefore). */
+  async update(
+    id: string,
+    changes: Partial<Pick<QueueItem, "promptText" | "notBefore">>,
+  ): Promise<void> {
+    const items = this.getAll().map((i) =>
+      i.id === id ? { ...i, ...changes } : i,
+    );
     await this.state.update(STORAGE_KEY, items);
   }
 

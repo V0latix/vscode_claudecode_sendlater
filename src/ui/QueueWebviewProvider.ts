@@ -20,7 +20,9 @@ type InMsg =
   | { type: "queuePrompt"; promptText: string; delayMinutes: number }
   | { type: "deleteItem"; id: string }
   | { type: "processNow" }
-  | { type: "forceSend"; id: string };
+  | { type: "forceSend"; id: string }
+  | { type: "snoozeItem"; id: string; minutes: number }
+  | { type: "editItem"; id: string; promptText: string; notBefore: string };
 
 // ── Message types (extension → webview) ───────────────────────────────────────
 type OutMsg =
@@ -185,6 +187,38 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         await this.processor.forceDeliver(msg.id);
         this.sendQueue();
         break;
+
+      case "snoozeItem": {
+        const item = this.store.getAll().find((i) => i.id === msg.id);
+        if (!item) {
+          return;
+        }
+        const base = new Date(
+          Math.max(Date.now(), new Date(item.notBefore).getTime()),
+        );
+        await this.store.update(msg.id, {
+          notBefore: addMinutes(base, msg.minutes).toISOString(),
+        });
+        this.sendQueue();
+        break;
+      }
+
+      case "editItem": {
+        if (!msg.promptText.trim()) {
+          this.post({
+            type: "toast",
+            level: "warn",
+            message: "Prompt cannot be empty.",
+          });
+          return;
+        }
+        await this.store.update(msg.id, {
+          promptText: msg.promptText,
+          notBefore: msg.notBefore,
+        });
+        this.sendQueue();
+        break;
+      }
     }
   }
 
@@ -497,7 +531,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     opacity: 0;
   }
   .queue-item:hover .item-actions { opacity: 1; }
-  .item-delete, .item-send {
+  .item-delete, .item-send, .item-snooze, .item-edit {
     background: transparent;
     border: none;
     cursor: pointer;
@@ -507,7 +541,60 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     color: var(--vscode-descriptionForeground);
   }
   .item-delete:hover { color: var(--vscode-errorForeground, #f48771); }
-  .item-send:hover { color: var(--vscode-textLink-foreground, #4fc1ff); }
+  .item-send:hover   { color: var(--vscode-textLink-foreground, #4fc1ff); }
+  .item-snooze:hover { color: var(--vscode-testing-iconPassed, #89d185); }
+  .item-edit:hover   { color: var(--vscode-foreground); }
+  .item-snooze { font-size: 0.78em; padding: 0 4px; }
+
+  /* ── Inline edit form ─────────────────────────────────────────────────── */
+  .edit-form { margin-top: 5px; }
+  .edit-textarea {
+    width: 100%;
+    min-height: 72px;
+    resize: vertical;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-focusBorder, #007acc);
+    border-radius: 2px;
+    padding: 5px 7px;
+    font-family: var(--vscode-editor-font-family, var(--vscode-font-family));
+    font-size: 0.88em;
+    line-height: 1.4;
+    display: block;
+  }
+  .edit-time-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 0.82em;
+    color: var(--vscode-descriptionForeground);
+  }
+  .edit-datetime {
+    flex: 1;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 2px;
+    padding: 2px 5px;
+    font-family: inherit;
+    font-size: 0.88em;
+  }
+  .edit-btn-row {
+    display: flex;
+    gap: 4px;
+    margin-top: 5px;
+  }
+  .item-save {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+  }
+  .item-save:hover { background: var(--vscode-button-hoverBackground); }
+  .item-cancel {
+    background: var(--vscode-button-secondaryBackground, rgba(128,128,128,.2));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  }
+  .item-cancel:hover { background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,.3)); }
 
   .empty-state {
     color: var(--vscode-descriptionForeground);
@@ -610,6 +697,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   let delayMinutes = saved.delayMinutes ?? 30;
   let promptText = saved.promptText ?? '';
   let delayMode = saved.delayMode ?? 'delay'; // 'delay' | 'at'
+  let lastItems = []; // last queue snapshot, used for local re-renders
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
   const rlCard        = document.getElementById('rlCard');
@@ -729,7 +817,8 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         break;
 
       case 'queueUpdated':
-        renderQueueItems(msg.items);
+        lastItems = msg.items;
+        renderQueueItems(lastItems);
         break;
 
       case 'queued':
@@ -842,9 +931,11 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   // ── Queue list render ─────────────────────────────────────────────────────
+  let editingId = null;
+
   function renderQueueItems(items) {
     const pending = items.filter(i => !i.processed);
-    const done    = items.filter(i =>  i.processed).slice(0, 3); // show last 3 delivered
+    const done    = items.filter(i =>  i.processed).slice(0, 3);
 
     pendingBadge.textContent = pending.length;
 
@@ -868,19 +959,77 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
       const timeCls = item.processed ? 'item-time delivered-label' : 'item-time';
       const preview = (item.promptText || '').replace(/\\n/g, ' ').slice(0, 72);
       const previewTrunc = item.promptText.length > 72 ? preview + '…' : preview;
+      const isEditing = editingId === item.id;
 
-      return \`<div class="queue-item \${cls}" title="\${esc(item.promptText)}">
+      const editForm = isEditing ? \`<div class="edit-form">
+    <textarea class="edit-textarea" data-id="\${item.id}">\${esc(item.promptText)}</textarea>
+    <div class="edit-time-row">
+      <span>At</span>
+      <input type="datetime-local" class="edit-datetime" data-id="\${item.id}" value="\${toDatetimeLocal(item.notBefore)}">
+    </div>
+    <div class="edit-btn-row">
+      <button class="btn-small item-save" data-id="\${item.id}">✓ Save</button>
+      <button class="btn-small item-cancel" data-id="\${item.id}">Cancel</button>
+    </div>
+  </div>\` : \`<div class="item-preview">\${esc(previewTrunc)}</div>\`;
+
+      const actions = !item.processed ? \`<div class="item-actions">
+    <button class="item-snooze" data-id="\${item.id}" data-minutes="15" title="Snooze +15 min">+15m</button>
+    <button class="item-snooze" data-id="\${item.id}" data-minutes="60" title="Snooze +1 hour">+1h</button>
+    <button class="item-edit" data-id="\${item.id}" title="Edit">✏</button>
+    <button class="item-send" data-id="\${item.id}" title="Send to Claude now">➤</button>
+    <button class="item-delete" data-id="\${item.id}" title="Remove">×</button>
+  </div>\` : '';
+
+      return \`<div class="queue-item \${cls}\${isEditing ? ' editing' : ''}" title="\${isEditing ? '' : esc(item.promptText)}">
   <span class="item-icon">\${icon}</span>
   <div class="item-body">
     <div class="\${timeCls}">\${timeLabel}</div>
-    <div class="item-preview">\${esc(previewTrunc)}</div>
+    \${editForm}
   </div>
-  \${!item.processed ? \`<div class="item-actions">
-    <button class="item-send" data-id="\${item.id}" title="Send to Claude now">➤</button>
-    <button class="item-delete" data-id="\${item.id}" title="Remove">×</button>
-  </div>\` : ''}
+  \${actions}
 </div>\`;
     }).join('');
+
+    // Wire snooze buttons
+    queueList.querySelectorAll('.item-snooze').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'snoozeItem', id: btn.dataset.id, minutes: Number(btn.dataset.minutes) });
+      });
+    });
+
+    // Wire edit buttons
+    queueList.querySelectorAll('.item-edit').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        editingId = editingId === btn.dataset.id ? null : btn.dataset.id;
+        renderQueueItems(lastItems);
+      });
+    });
+
+    // Wire save buttons
+    queueList.querySelectorAll('.item-save').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const textarea = queueList.querySelector(\`.edit-textarea[data-id="\${id}"]\`);
+        const dtInput  = queueList.querySelector(\`.edit-datetime[data-id="\${id}"]\`);
+        if (!textarea || !dtInput) { return; }
+        const newNotBefore = new Date(dtInput.value).toISOString();
+        vscode.postMessage({ type: 'editItem', id, promptText: textarea.value, notBefore: newNotBefore });
+        editingId = null;
+      });
+    });
+
+    // Wire cancel buttons
+    queueList.querySelectorAll('.item-cancel').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        editingId = null;
+        renderQueueItems(lastItems);
+      });
+    });
 
     // Wire send buttons
     queueList.querySelectorAll('.item-send').forEach(btn => {
@@ -897,6 +1046,14 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         vscode.postMessage({ type: 'deleteItem', id: btn.dataset.id });
       });
     });
+  }
+
+  /** Convert ISO UTC string to datetime-local value (YYYY-MM-DDTHH:MM) in local time. */
+  function toDatetimeLocal(iso) {
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+           'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
   // ── Toast ─────────────────────────────────────────────────────────────────

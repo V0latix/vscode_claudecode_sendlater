@@ -7,9 +7,10 @@
 
 ## P0 — Bloquants publication Marketplace
 
-- [ ] **Ajouter `media/icon.png`** — package.json référence une PNG qui n'existe pas (seulement SVG). Générer une PNG 128×128 depuis l'SVG existant (`sharp` ou `imagemagick`).
-- [ ] **Corriger les dates placeholder dans CHANGELOG.md** — `2026-03-XX` / `2026-XX-XX` empêchent une lecture propre du changelog.
-- [ ] **README Marketplace** — Ajouter captures d'écran annotées (queue UI, usage panel, command browser) et un GIF de démonstration du flow rate-limit.
+- [x] **Ajouter `media/icon.png`** — présent et fonctionnel.
+- [x] **Corriger les dates placeholder dans CHANGELOG.md** — `0.2.0` → 2026-03-27, `0.1.1` → 2026-02-24.
+- [x] **README Marketplace** — README entièrement reécrit : installation, usage détaillé, tableaux commandes/config, fonctionnement interne, sécurité.
+- [ ] **Screenshots / GIF** — Captures d'écran annotées des 3 panels + GIF du flow rate-limit (à faire manuellement).
 
 ---
 
@@ -17,8 +18,8 @@
 
 ### Queue
 
-- [ ] **Édition in-place** — Permettre de modifier le texte ou l'heure d'un item en attente directement dans la webview (double-clic ou bouton crayon). Actuellement impossible sans supprimer et recréer.
-- [ ] **Snooze rapide** — Bouton "+15 min" et "+1h" sur chaque item de la liste pour repousser rapidement sans rouvrir le formulaire.
+- [x] **Édition in-place** — Bouton ✏ sur chaque item ; ouvre un formulaire inline avec textarea + datetime-local. Sauvegarde via `editItem` → `QueueStore.update()`.
+- [x] **Snooze rapide** — Boutons +15m et +1h sur chaque item. Reporte depuis `max(now, notBefore)` via `snoozeItem` → `QueueStore.update()`.
 - [ ] **Aperçu du prompt** — Tooltip ou expand au survol d'un item pour voir les 200 premiers caractères sans ouvrir le fichier.
 - [ ] **Badge de notification** — Afficher un badge sur l'icône de l'activity bar lors de la livraison d'un item (via `viewBadge` API, dispo depuis VS Code 1.83).
 - [ ] **Support multi-terminal nommé** — Permettre à l'utilisateur de configurer le nom exact du terminal cible (`promptQueue.targetTerminalName`) plutôt que de dépendre de la détection heuristique.

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as nodeCrypto from "crypto";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 
 export interface ClaudeCommand {
   /** e.g. "git-status" */
@@ -12,9 +13,338 @@ export interface ClaudeCommand {
   slash: string;
   /** Value of the `description` frontmatter field */
   description: string;
-  /** Absolute path to the .md file */
+  /** Absolute path to the .md file, empty for built-ins */
   filePath: string;
+  /** Where the command comes from */
+  source: "workspace" | "global" | "plugin" | "builtin";
+  /** Plugin name, e.g. "codex" or "vercel" */
+  plugin?: string;
 }
+
+// ── Native Claude Code built-in commands (extracted from binary v2.1.91) ────
+// Source: `strings` on Mach-O + local-jsx marker extraction. Re-run when
+// updating Claude Code: python3 script in docs/extract-builtins.md
+
+type BuiltinDef = Omit<ClaudeCommand, "filePath" | "source" | "category">;
+
+const BUILTIN_COMMANDS: BuiltinDef[] = [
+  // ── Conversation ──────────────────────────────────────────────────────────
+  {
+    name: "help",
+    slash: "/help",
+    description: "Show available commands and usage help",
+  },
+  {
+    name: "clear",
+    slash: "/clear",
+    description: "Clear conversation history and free context window",
+  },
+  {
+    name: "compact",
+    slash: "/compact",
+    description: "Compact conversation with an optional summary instruction",
+  },
+  {
+    name: "rewind",
+    slash: "/rewind",
+    description: "Rewind the conversation to a previous point (double-tap Esc)",
+  },
+  {
+    name: "branch",
+    slash: "/branch",
+    description: "Create a branch of the current conversation at this point",
+  },
+  {
+    name: "resume",
+    slash: "/resume",
+    description: "Resume a previous conversation",
+  },
+  {
+    name: "rename",
+    slash: "/rename",
+    description: "Rename the current conversation",
+  },
+  {
+    name: "export",
+    slash: "/export",
+    description: "Export the current conversation to a file or clipboard",
+  },
+  {
+    name: "copy",
+    slash: "/copy",
+    description:
+      "Copy Claude's last response to clipboard (or /copy N for Nth-latest)",
+  },
+  {
+    name: "diff",
+    slash: "/diff",
+    description: "View uncommitted changes and per-turn diffs",
+  },
+  {
+    name: "think-back",
+    slash: "/think-back",
+    description: "Your 2025 Claude Code Year in Review",
+  },
+  // ── Mode & Model ─────────────────────────────────────────────────────────
+  {
+    name: "model",
+    slash: "/model",
+    description: "Set the AI model for this session",
+  },
+  {
+    name: "effort",
+    slash: "/effort",
+    description: "Set effort level for model usage (low / medium / high / max)",
+  },
+  {
+    name: "fast",
+    slash: "/fast",
+    description: "Toggle fast mode (Max subscription only)",
+  },
+  {
+    name: "plan",
+    slash: "/plan",
+    description: "Enable plan mode or view the current session plan",
+  },
+  { name: "brief", slash: "/brief", description: "Toggle brief-only mode" },
+  { name: "vim", slash: "/vim", description: "Toggle Vim keybindings" },
+  // ── Project & Memory ─────────────────────────────────────────────────────
+  {
+    name: "init",
+    slash: "/init",
+    description: "Create a CLAUDE.md file with project guidelines",
+  },
+  { name: "memory", slash: "/memory", description: "Edit Claude memory files" },
+  {
+    name: "add-dir",
+    slash: "/add-dir",
+    description: "Add a new working directory to the session",
+  },
+  // ── Automation & Tasks ───────────────────────────────────────────────────
+  {
+    name: "hooks",
+    slash: "/hooks",
+    description: "View hook configurations for tool events",
+  },
+  {
+    name: "tasks",
+    slash: "/tasks",
+    description: "List and manage background tasks",
+  },
+  {
+    name: "agents",
+    slash: "/agents",
+    description: "Manage agent configurations",
+  },
+  {
+    name: "loop",
+    slash: "/loop",
+    description:
+      "Run a prompt on a recurring schedule (e.g. /loop 5m check deploy)",
+  },
+  {
+    name: "autocompact",
+    slash: "/autocompact",
+    description: "Configure the auto-compact window size",
+  },
+  {
+    name: "security-review",
+    slash: "/security-review",
+    description:
+      "Complete a security review of pending changes on the current branch",
+  },
+  // ── MCP & Skills ─────────────────────────────────────────────────────────
+  {
+    name: "mcp",
+    slash: "/mcp",
+    description: "List and manage MCP server connections",
+  },
+  { name: "skills", slash: "/skills", description: "List available skills" },
+  {
+    name: "plugin",
+    slash: "/plugin",
+    description: "Manage Claude Code plugins (install / update / remove)",
+  },
+  // ── Permissions & Security ───────────────────────────────────────────────
+  {
+    name: "permissions",
+    slash: "/permissions",
+    description: "Manage allow & deny tool permission rules",
+  },
+  {
+    name: "review",
+    slash: "/review",
+    description: "Review the current file or selection",
+  },
+  {
+    name: "pr_comments",
+    slash: "/pr_comments",
+    description: "Fetch and display open pull request comments",
+  },
+  // ── UI & Appearance ──────────────────────────────────────────────────────
+  {
+    name: "color",
+    slash: "/color",
+    description: "Set a color for this session (useful when multi-Claudes)",
+  },
+  { name: "theme", slash: "/theme", description: "Change the color theme" },
+  {
+    name: "config",
+    slash: "/config",
+    description: "Open config panel — permission mode, model, and more",
+  },
+  {
+    name: "statusline",
+    slash: "/statusline",
+    description: "Set up a custom status line beneath the input box",
+  },
+  // ── Status & Monitoring ──────────────────────────────────────────────────
+  {
+    name: "status",
+    slash: "/status",
+    description:
+      "Show Claude Code status: version, model, account, connectivity",
+  },
+  { name: "usage", slash: "/usage", description: "Show plan usage limits" },
+  {
+    name: "cost",
+    slash: "/cost",
+    description: "Show token usage and cost for the current session",
+  },
+  {
+    name: "stats",
+    slash: "/stats",
+    description: "Show your Claude Code usage statistics and activity",
+  },
+  {
+    name: "rate-limit-options",
+    slash: "/rate-limit-options",
+    description: "Show options when rate limit is reached",
+  },
+  // ── Account & Auth ───────────────────────────────────────────────────────
+  { name: "login", slash: "/login", description: "Switch Anthropic accounts" },
+  { name: "logout", slash: "/logout", description: "Sign out of Claude Code" },
+  {
+    name: "upgrade",
+    slash: "/upgrade",
+    description: "Upgrade to Max for higher rate limits and more Opus",
+  },
+  {
+    name: "passes",
+    slash: "/passes",
+    description:
+      "Share a free week of Claude Code with friends and earn extra usage",
+  },
+  {
+    name: "extra-usage",
+    slash: "/extra-usage",
+    description: "Configure extra usage to keep working when limits are hit",
+  },
+  {
+    name: "privacy-settings",
+    slash: "/privacy-settings",
+    description: "View and update your privacy settings",
+  },
+  {
+    name: "feedback",
+    slash: "/feedback",
+    description: "Submit feedback about Claude Code",
+  },
+  {
+    name: "bug",
+    slash: "/bug",
+    description: "Submit a bug report to Anthropic",
+  },
+  {
+    name: "doctor",
+    slash: "/doctor",
+    description: "Verify Claude Code installation health",
+  },
+  {
+    name: "release-notes",
+    slash: "/release-notes",
+    description: "Show what's new in the current Claude Code version",
+  },
+  // ── Integrations & Setup ─────────────────────────────────────────────────
+  {
+    name: "terminal-setup",
+    slash: "/terminal-setup",
+    description: "Enable Option+Enter / Shift+Enter key bindings for newlines",
+  },
+  { name: "ide", slash: "/ide", description: "Connect Claude to your IDE" },
+  {
+    name: "install-github-app",
+    slash: "/install-github-app",
+    description: "Set up Claude GitHub Actions for a repository",
+  },
+  {
+    name: "install-slack-app",
+    slash: "/install-slack-app",
+    description: "Install Claude Code in Slack",
+  },
+  {
+    name: "desktop",
+    slash: "/desktop",
+    description: "Continue this session in Claude Code Desktop",
+  },
+  {
+    name: "mobile",
+    slash: "/mobile",
+    description: "Show QR code to download the Claude mobile app",
+  },
+  {
+    name: "web-setup",
+    slash: "/web-setup",
+    description: "Set up Claude Code on the web (requires GitHub account)",
+  },
+  {
+    name: "remote-control",
+    slash: "/remote-control",
+    description: "Connect this terminal for remote-control sessions",
+  },
+  {
+    name: "remote-env",
+    slash: "/remote-env",
+    description: "Toggle a searchable tag on the current session",
+  },
+  {
+    name: "session",
+    slash: "/session",
+    description: "Show remote session URL and QR code",
+  },
+  // ── Misc ─────────────────────────────────────────────────────────────────
+  {
+    name: "stickers",
+    slash: "/stickers",
+    description: "Order Claude Code stickers",
+  },
+  {
+    name: "powerup",
+    slash: "/powerup",
+    description:
+      "Discover Claude Code features through quick interactive lessons",
+  },
+  {
+    name: "buddy",
+    slash: "/buddy",
+    description: "Hatch a coding companion (/buddy on | off | pet)",
+  },
+  {
+    name: "install",
+    slash: "/install",
+    description: "Install Claude Code native build",
+  },
+  {
+    name: "ultraplan",
+    slash: "/ultraplan",
+    description: "Draft a plan on the web that you can edit and approve",
+  },
+  {
+    name: "ultrareview",
+    slash: "/ultrareview",
+    description: "Show remote session URL and QR code for review",
+  },
+];
 
 export class ClaudeCommandsWebviewProvider
   implements vscode.WebviewViewProvider
@@ -56,45 +386,52 @@ export class ClaudeCommandsWebviewProvider
   // ── Scanning ───────────────────────────────────────────────────────────────
 
   private scanCommands(): ClaudeCommand[] {
+    const results: ClaudeCommand[] = [];
+
+    // 1. Workspace-level: <wsFolder>/.claude/commands
     const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!wsFolder) {
-      return [];
-    }
-
-    const commandsRoot = path.join(wsFolder, ".claude", "commands");
-    if (!fs.existsSync(commandsRoot)) {
-      return [];
-    }
-
-    const commands: ClaudeCommand[] = [];
-
-    for (const category of fs.readdirSync(commandsRoot)) {
-      const categoryPath = path.join(commandsRoot, category);
-      if (!fs.statSync(categoryPath).isDirectory()) {
-        continue;
-      }
-
-      for (const file of fs.readdirSync(categoryPath)) {
-        if (!file.endsWith(".md")) {
-          continue;
-        }
-        const filePath = path.join(categoryPath, file);
-        const name = file.replace(/\.md$/, "");
-        const slash = `/${category}/${name}`;
-
-        let description = "";
-        try {
-          const content = fs.readFileSync(filePath, "utf8");
-          description = parseFrontmatterDescription(content);
-        } catch {
-          /* ignore unreadable files */
-        }
-
-        commands.push({ name, category, slash, description, filePath });
+    if (wsFolder) {
+      const wsRoot = path.join(wsFolder, ".claude", "commands");
+      if (fs.existsSync(wsRoot)) {
+        results.push(...scanDir(wsRoot, "", "workspace"));
       }
     }
 
-    return commands.sort(
+    // 2. Global user-level: ~/.claude/commands
+    const globalRoot = path.join(os.homedir(), ".claude", "commands");
+    if (fs.existsSync(globalRoot)) {
+      results.push(...scanDir(globalRoot, "", "global"));
+    }
+
+    // 3. Installed plugins: ~/.claude/plugins/installed_plugins.json
+    results.push(...scanPlugins());
+
+    // 4. Built-in Claude Code native commands
+    for (const cmd of BUILTIN_COMMANDS) {
+      results.push({
+        ...cmd,
+        category: "built-in",
+        filePath: "",
+        source: "builtin",
+      });
+    }
+
+    // Deduplicate by slash (workspace > global > plugin > builtin)
+    const seen = new Map<string, ClaudeCommand>();
+    const priority: Record<string, number> = {
+      workspace: 0,
+      global: 1,
+      plugin: 2,
+      builtin: 3,
+    };
+    for (const cmd of results) {
+      const existing = seen.get(cmd.slash);
+      if (!existing || priority[cmd.source] < priority[existing.source]) {
+        seen.set(cmd.slash, cmd);
+      }
+    }
+
+    return Array.from(seen.values()).sort(
       (a, b) =>
         a.category.localeCompare(b.category) || a.name.localeCompare(b.name),
     );
@@ -242,6 +579,30 @@ export class ClaudeCommandsWebviewProvider
   }
   .action-btn:hover { color: var(--vscode-foreground); background: rgba(128,128,128,.2); }
 
+  .source-badge {
+    font-size: 0.72em;
+    padding: 1px 5px;
+    border-radius: 8px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .source-badge.workspace {
+    background: color-mix(in srgb, var(--vscode-textLink-foreground, #4fc1ff) 15%, transparent);
+    color: var(--vscode-textLink-foreground, #4fc1ff);
+  }
+  .source-badge.global {
+    background: color-mix(in srgb, var(--vscode-testing-iconPassed, #89d185) 15%, transparent);
+    color: var(--vscode-testing-iconPassed, #89d185);
+  }
+  .source-badge.plugin {
+    background: color-mix(in srgb, #c586c0 15%, transparent);
+    color: #c586c0;
+  }
+  .source-badge.builtin {
+    background: rgba(128,128,128,.15);
+    color: var(--vscode-descriptionForeground);
+  }
+
   .cmd-desc {
     font-size: 0.83em;
     color: var(--vscode-descriptionForeground);
@@ -332,11 +693,24 @@ export class ClaudeCommandsWebviewProvider
       groups[cmd.category].push(cmd);
     }
 
-    const categoryIcons = { tools: '🔧', workflows: '⚙️' };
+    const categoryIcons = { 'tools': '🔧', 'workflows': '⚙️', 'built-in': '✦', 'commands': '📄' };
+    const sourcePriority = { workspace: 0, global: 1, plugin: 2, builtin: 3 };
+    // Sort: workspace/global first (α), plugins second (α), built-in last
+    const sortedCats = Object.keys(groups).sort((a, b) => {
+      const aIsBuiltin = a === 'built-in';
+      const bIsBuiltin = b === 'built-in';
+      const aIsPlugin = groups[a][0]?.source === 'plugin';
+      const bIsPlugin = groups[b][0]?.source === 'plugin';
+      if (aIsBuiltin !== bIsBuiltin) { return aIsBuiltin ? 1 : -1; }
+      if (aIsPlugin !== bIsPlugin) { return aIsPlugin ? 1 : -1; }
+      return a.localeCompare(b);
+    });
     let html = '';
 
-    for (const [cat, cmds] of Object.entries(groups)) {
-      const icon = categoryIcons[cat] || '📁';
+    for (const cat of sortedCats) {
+      const cmds = groups[cat];
+      const isPlugin = cmds[0]?.source === 'plugin';
+      const icon = categoryIcons[cat] || (isPlugin ? '🔌' : '📁');
       html += \`<div class="category-header">
   <span class="category-icon">\${icon}</span> \${esc(cat)}
   <span class="count-badge">\${cmds.length}</span>
@@ -344,12 +718,17 @@ export class ClaudeCommandsWebviewProvider
       for (const cmd of cmds) {
         const desc = highlight(esc(cmd.description), query);
         const slashHl = highlight(esc(cmd.slash), query);
-        html += \`<div class="cmd-card" data-path="\${esc(cmd.filePath)}" data-slash="\${esc(cmd.slash)}">
+        const sourceLabel = { workspace: 'ws', global: 'global', plugin: cmd.plugin || 'plugin', builtin: 'native' }[cmd.source] || cmd.source;
+        const openBtn = cmd.filePath
+          ? \`<button class="action-btn open-btn" data-path="\${esc(cmd.filePath)}" title="Open file">↗ open</button>\`
+          : '';
+        html += \`<div class="cmd-card" data-path="\${esc(cmd.filePath || '')}" data-slash="\${esc(cmd.slash)}">
   <div class="cmd-header">
     <span class="cmd-slash">\${slashHl}</span>
+    <span class="source-badge \${cmd.source}">\${esc(sourceLabel)}</span>
     <div class="cmd-actions">
       <button class="action-btn copy-btn" data-slash="\${esc(cmd.slash)}" title="Copy slash command">⎘ copy</button>
-      <button class="action-btn open-btn" data-path="\${esc(cmd.filePath)}" title="Open file">↗ open</button>
+      \${openBtn}
     </div>
   </div>
   \${desc ? \`<div class="cmd-desc">\${desc}</div>\` : ''}
@@ -424,6 +803,151 @@ export class ClaudeCommandsWebviewProvider
 </body>
 </html>`;
   }
+}
+
+// ── Recursive directory scanner ─────────────────────────────────────────────
+
+function scanDir(
+  dirPath: string,
+  slashPrefix: string,
+  source: "workspace" | "global",
+): ClaudeCommand[] {
+  const results: ClaudeCommand[] = [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dirPath);
+  } catch {
+    return results;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(entryPath);
+    } catch {
+      continue;
+    }
+
+    if (stat.isDirectory()) {
+      results.push(...scanDir(entryPath, `${slashPrefix}/${entry}`, source));
+    } else if (entry.endsWith(".md")) {
+      const name = entry.replace(/\.md$/, "");
+      const slash = `${slashPrefix}/${name}`;
+      // category = everything between the first / and the last segment
+      const parts = slash.split("/").filter(Boolean);
+      const category =
+        parts.length > 1 ? parts.slice(0, -1).join("/") : "commands";
+
+      let description = "";
+      try {
+        description = parseFrontmatterDescription(
+          fs.readFileSync(entryPath, "utf8"),
+        );
+      } catch {
+        /* ignore unreadable files */
+      }
+
+      results.push({
+        name,
+        category,
+        slash,
+        description,
+        filePath: entryPath,
+        source,
+      });
+    }
+  }
+
+  return results;
+}
+
+// ── Plugin scanner ───────────────────────────────────────────────────────────
+
+function scanPlugins(): ClaudeCommand[] {
+  const results: ClaudeCommand[] = [];
+  const registryPath = path.join(
+    os.homedir(),
+    ".claude",
+    "plugins",
+    "installed_plugins.json",
+  );
+
+  let registry: { plugins?: Record<string, { installPath: string }[]> } = {};
+  try {
+    registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+  } catch {
+    return results;
+  }
+
+  for (const installs of Object.values(registry.plugins ?? {})) {
+    // Take the most recently installed entry
+    const install = installs[installs.length - 1];
+    if (!install?.installPath) {
+      continue;
+    }
+
+    const installPath = install.installPath;
+
+    // Resolve plugin name from manifest (.claude-plugin/plugin.json or .plugin/plugin.json)
+    let pluginName = "";
+    for (const manifestDir of [".claude-plugin", ".plugin"]) {
+      const manifestPath = path.join(installPath, manifestDir, "plugin.json");
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        if (manifest.name) {
+          pluginName = manifest.name;
+          break;
+        }
+      } catch {
+        /* try next */
+      }
+    }
+    if (!pluginName) {
+      continue;
+    }
+
+    // Scan installPath/commands/*.md (flat only — plugin commands are never nested)
+    const commandsDir = path.join(installPath, "commands");
+    let files: string[];
+    try {
+      files = fs.readdirSync(commandsDir);
+    } catch {
+      continue;
+    }
+
+    for (const file of files) {
+      // Skip internal convention files (prefixed with _)
+      if (!file.endsWith(".md") || file.startsWith("_")) {
+        continue;
+      }
+
+      const filePath = path.join(commandsDir, file);
+      const name = file.replace(/\.md$/, "");
+      const slash = `/${pluginName}:${name}`;
+
+      let description = "";
+      try {
+        description = parseFrontmatterDescription(
+          fs.readFileSync(filePath, "utf8"),
+        );
+      } catch {
+        /* ignore */
+      }
+
+      results.push({
+        name,
+        category: pluginName,
+        slash,
+        description,
+        filePath,
+        source: "plugin",
+        plugin: pluginName,
+      });
+    }
+  }
+
+  return results;
 }
 
 // ── Frontmatter parser ──────────────────────────────────────────────────────
