@@ -8,7 +8,7 @@
 - `enqueuePrompt` command now accepts `HH:MM` format in addition to minutes.
 - **Claude Commands browser** — new `claudeCommandsView` panel in the Activity Bar sidebar. Scans `.claude/commands/**/*.md`, parses YAML frontmatter `description`, and displays commands grouped by category with live search, highlight, copy-to-clipboard on click, and open-file action.
 
-## [0.2.0] — 2026-03-XX
+## [0.2.0] — 2026-03-27
 
 ### Added
 - Webview-based Queue panel (`QueueWebviewProvider`) replacing the tree-view approach — full form with rate-limit detection card, prompt textarea, and live queue list.
@@ -23,7 +23,7 @@
 ### Changed
 - Default delay unit changed from hours to **minutes** (`promptQueue.defaultDelayMinutes`, default `30`).
 
-## [0.1.1] — 2026-XX-XX
+## [0.1.1] — 2026-02-24
 
 ### Fixed
 - Queue processing reliability improvements.
