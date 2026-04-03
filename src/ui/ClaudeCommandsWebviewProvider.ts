@@ -3,6 +3,7 @@ import * as nodeCrypto from "crypto";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { execSync } from "child_process";
 
 export interface ClaudeCommand {
   /** e.g. "git-status" */
@@ -16,7 +17,14 @@ export interface ClaudeCommand {
   /** Absolute path to the .md file, empty for built-ins */
   filePath: string;
   /** Where the command comes from */
-  source: "workspace" | "global" | "plugin" | "builtin";
+  source:
+    | "workspace"
+    | "global"
+    | "plugin"
+    | "builtin"
+    | "agent"
+    | "skill"
+    | "mcp";
   /** Plugin name, e.g. "codex" or "vercel" */
   plugin?: string;
 }
@@ -406,8 +414,31 @@ export class ClaudeCommandsWebviewProvider
     // 3. Installed plugins: ~/.claude/plugins/installed_plugins.json
     results.push(...scanPlugins());
 
-    // 4. Built-in Claude Code native commands
-    for (const cmd of BUILTIN_COMMANDS) {
+    // 4. Agents: <ws>/.claude/agents/*.md + ~/.claude/agents/*.md
+    if (wsFolder) {
+      results.push(
+        ...scanAgents(path.join(wsFolder, ".claude", "agents"), "workspace"),
+      );
+    }
+    results.push(
+      ...scanAgents(path.join(os.homedir(), ".claude", "agents"), "global"),
+    );
+
+    // 5. Skills: <ws>/.claude/skills/*/SKILL.md + ~/.claude/skills/*/SKILL.md
+    if (wsFolder) {
+      results.push(
+        ...scanSkills(path.join(wsFolder, ".claude", "skills"), "workspace"),
+      );
+    }
+    results.push(
+      ...scanSkills(path.join(os.homedir(), ".claude", "skills"), "global"),
+    );
+
+    // 6. MCP servers from ~/.claude/mcp.json + workspace .claude/settings.json
+    results.push(...scanMcpServers(wsFolder));
+
+    // 7. Built-in Claude Code native commands (dynamic + hardcoded fallback)
+    for (const cmd of loadBuiltins()) {
       results.push({
         ...cmd,
         category: "built-in",
@@ -416,13 +447,16 @@ export class ClaudeCommandsWebviewProvider
       });
     }
 
-    // Deduplicate by slash (workspace > global > plugin > builtin)
+    // Deduplicate by slash (workspace > global > plugin > agent > skill > mcp > builtin)
     const seen = new Map<string, ClaudeCommand>();
     const priority: Record<string, number> = {
       workspace: 0,
       global: 1,
       plugin: 2,
-      builtin: 3,
+      agent: 3,
+      skill: 4,
+      mcp: 5,
+      builtin: 6,
     };
     for (const cmd of results) {
       const existing = seen.get(cmd.slash);
@@ -602,6 +636,18 @@ export class ClaudeCommandsWebviewProvider
     background: rgba(128,128,128,.15);
     color: var(--vscode-descriptionForeground);
   }
+  .source-badge.agent {
+    background: color-mix(in srgb, #f0a050 15%, transparent);
+    color: #f0a050;
+  }
+  .source-badge.skill {
+    background: color-mix(in srgb, #50c8c8 15%, transparent);
+    color: #50c8c8;
+  }
+  .source-badge.mcp {
+    background: color-mix(in srgb, #c8c850 15%, transparent);
+    color: #c8c850;
+  }
 
   .cmd-desc {
     font-size: 0.83em;
@@ -693,24 +739,21 @@ export class ClaudeCommandsWebviewProvider
       groups[cmd.category].push(cmd);
     }
 
-    const categoryIcons = { 'tools': '🔧', 'workflows': '⚙️', 'built-in': '✦', 'commands': '📄' };
-    const sourcePriority = { workspace: 0, global: 1, plugin: 2, builtin: 3 };
-    // Sort: workspace/global first (α), plugins second (α), built-in last
+    const categoryIcons = { 'tools': '🔧', 'workflows': '⚙️', 'built-in': '✦', 'commands': '📄', 'agents': '🤖', 'skills': '⚡', 'mcp': '🔗' };
+    const sourceSortOrder = { workspace: 0, global: 1, plugin: 2, agent: 3, skill: 4, mcp: 5, builtin: 6 };
+    // Sort: workspace/global first (α), plugins/agents/skills/mcp next (α), built-in last
     const sortedCats = Object.keys(groups).sort((a, b) => {
-      const aIsBuiltin = a === 'built-in';
-      const bIsBuiltin = b === 'built-in';
-      const aIsPlugin = groups[a][0]?.source === 'plugin';
-      const bIsPlugin = groups[b][0]?.source === 'plugin';
-      if (aIsBuiltin !== bIsBuiltin) { return aIsBuiltin ? 1 : -1; }
-      if (aIsPlugin !== bIsPlugin) { return aIsPlugin ? 1 : -1; }
+      const aOrder = sourceSortOrder[groups[a][0]?.source] ?? 2;
+      const bOrder = sourceSortOrder[groups[b][0]?.source] ?? 2;
+      if (aOrder !== bOrder) { return aOrder - bOrder; }
       return a.localeCompare(b);
     });
     let html = '';
 
     for (const cat of sortedCats) {
       const cmds = groups[cat];
-      const isPlugin = cmds[0]?.source === 'plugin';
-      const icon = categoryIcons[cat] || (isPlugin ? '🔌' : '📁');
+      const src = cmds[0]?.source;
+      const icon = categoryIcons[cat] || (src === 'plugin' ? '🔌' : '📁');
       html += \`<div class="category-header">
   <span class="category-icon">\${icon}</span> \${esc(cat)}
   <span class="count-badge">\${cmds.length}</span>
@@ -718,7 +761,7 @@ export class ClaudeCommandsWebviewProvider
       for (const cmd of cmds) {
         const desc = highlight(esc(cmd.description), query);
         const slashHl = highlight(esc(cmd.slash), query);
-        const sourceLabel = { workspace: 'ws', global: 'global', plugin: cmd.plugin || 'plugin', builtin: 'native' }[cmd.source] || cmd.source;
+        const sourceLabel = { workspace: 'ws', global: 'global', plugin: cmd.plugin || 'plugin', builtin: 'native', agent: 'agent', skill: 'skill', mcp: 'mcp' }[cmd.source] || cmd.source;
         const openBtn = cmd.filePath
           ? \`<button class="action-btn open-btn" data-path="\${esc(cmd.filePath)}" title="Open file">↗ open</button>\`
           : '';
@@ -950,9 +993,317 @@ function scanPlugins(): ClaudeCommand[] {
   return results;
 }
 
+// ── Agent scanner ────────────────────────────────────────────────────────────
+
+export function scanAgents(
+  dir: string,
+  source: "workspace" | "global",
+): ClaudeCommand[] {
+  const results: ClaudeCommand[] = [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return results;
+  }
+
+  for (const entry of entries) {
+    if (!entry.endsWith(".md")) {
+      continue;
+    }
+    const filePath = path.join(dir, entry);
+    const name = entry.replace(/\.md$/, "");
+    let description = "";
+    try {
+      description = parseFrontmatterDescription(
+        fs.readFileSync(filePath, "utf8"),
+      );
+    } catch {
+      /* ignore */
+    }
+    results.push({
+      name,
+      category: "agents",
+      slash: `@${name}`,
+      description,
+      filePath,
+      source: "agent" as const,
+    });
+  }
+  return results;
+}
+
+// ── Skill scanner ─────────────────────────────────────────────────────────────
+
+export function scanSkills(
+  dir: string,
+  source: "workspace" | "global",
+): ClaudeCommand[] {
+  const results: ClaudeCommand[] = [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return results;
+  }
+
+  for (const entry of entries) {
+    const skillDir = path.join(dir, entry);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(skillDir);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) {
+      continue;
+    }
+
+    const skillFile = path.join(skillDir, "SKILL.md");
+    if (!fs.existsSync(skillFile)) {
+      continue;
+    }
+
+    let description = "";
+    try {
+      description = parseFrontmatterDescription(
+        fs.readFileSync(skillFile, "utf8"),
+      );
+    } catch {
+      /* ignore */
+    }
+
+    results.push({
+      name: entry,
+      category: "skills",
+      slash: `/${entry}`,
+      description,
+      filePath: skillFile,
+      source: "skill" as const,
+    });
+  }
+  return results;
+}
+
+// ── MCP server scanner ────────────────────────────────────────────────────────
+
+interface McpServerConfig {
+  command?: string;
+  args?: string[];
+  url?: string;
+}
+
+export function scanMcpServers(wsFolder: string | undefined): ClaudeCommand[] {
+  const results: ClaudeCommand[] = [];
+  const seen = new Set<string>();
+
+  function addServer(name: string, cfg: McpServerConfig): void {
+    if (seen.has(name)) {
+      return;
+    }
+    seen.add(name);
+    const cmdParts = cfg.command
+      ? [cfg.command, ...(cfg.args ?? [])].join(" ")
+      : (cfg.url ?? "");
+    results.push({
+      name,
+      category: "mcp",
+      slash: `mcp:${name}`,
+      description: cmdParts
+        ? `MCP server — ${cmdParts.slice(0, 80)}`
+        : "MCP server",
+      filePath: "",
+      source: "mcp" as const,
+    });
+  }
+
+  // 1. Global ~/.claude/mcp.json
+  try {
+    const globalMcp = JSON.parse(
+      fs.readFileSync(path.join(os.homedir(), ".claude", "mcp.json"), "utf8"),
+    ) as { mcpServers?: Record<string, McpServerConfig> };
+    for (const [name, cfg] of Object.entries(globalMcp.mcpServers ?? {})) {
+      addServer(name, cfg);
+    }
+  } catch {
+    /* no global mcp.json */
+  }
+
+  // 2. Workspace .claude/settings.json (mcpServers key)
+  if (wsFolder) {
+    try {
+      const wsSettings = JSON.parse(
+        fs.readFileSync(
+          path.join(wsFolder, ".claude", "settings.json"),
+          "utf8",
+        ),
+      ) as { mcpServers?: Record<string, McpServerConfig> };
+      for (const [name, cfg] of Object.entries(wsSettings.mcpServers ?? {})) {
+        addServer(name, cfg);
+      }
+    } catch {
+      /* no workspace settings.json or no mcpServers key */
+    }
+  }
+
+  return results;
+}
+
+// ── Dynamic built-in loader ──────────────────────────────────────────────────
+
+type BuiltinEntry = Omit<ClaudeCommand, "filePath" | "source" | "category">;
+const BUILTINS_CACHE_FILE = path.join(
+  os.homedir(),
+  ".claude",
+  "vscode-ext-builtins-cache.json",
+);
+
+/**
+ * Returns built-in commands: tries a binary extraction (cached per Claude version),
+ * falls back to the hardcoded BUILTIN_COMMANDS list.
+ */
+function loadBuiltins(): BuiltinEntry[] {
+  try {
+    const dynamic = extractBuiltinsFromBinary();
+    if (dynamic.length > 0) {
+      return dynamic;
+    }
+  } catch {
+    /* fall through */
+  }
+  return BUILTIN_COMMANDS;
+}
+
+function extractBuiltinsFromBinary(): BuiltinEntry[] {
+  // 1. Locate the claude binary (follow symlinks)
+  let claudePath: string;
+  try {
+    const which = execSync("which claude", {
+      encoding: "utf8",
+      timeout: 3000,
+    }).trim();
+    claudePath = execSync(
+      `readlink -f "${which}" 2>/dev/null || echo "${which}"`,
+      {
+        encoding: "utf8",
+        timeout: 3000,
+      },
+    ).trim();
+  } catch {
+    return [];
+  }
+
+  // 2. Get version string for cache key
+  let version: string;
+  try {
+    version = execSync("claude --version", { encoding: "utf8", timeout: 3000 })
+      .trim()
+      .split(" ")[0];
+  } catch {
+    return [];
+  }
+
+  // 3. Return cached result if version matches
+  try {
+    const cache = JSON.parse(fs.readFileSync(BUILTINS_CACHE_FILE, "utf8"));
+    if (
+      cache.version === version &&
+      Array.isArray(cache.commands) &&
+      cache.commands.length > 0
+    ) {
+      return cache.commands as BuiltinEntry[];
+    }
+  } catch {
+    /* cache miss */
+  }
+
+  // 4. Extract from binary: `strings` + local-jsx marker pattern
+  let stringsOut: string;
+  try {
+    stringsOut = execSync(`strings "${claudePath}"`, {
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+  } catch {
+    return [];
+  }
+
+  const lines = stringsOut.split("\n");
+  const commands: BuiltinEntry[] = [];
+  const seen = new Set<string>();
+  const SKIP = new Set([
+    "local",
+    "jsx",
+    "text",
+    "path",
+    "stub",
+    "console",
+    "crypto",
+    "local-jsx",
+  ]);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() !== "local-jsx") {
+      continue;
+    }
+
+    // First valid candidate after the marker is the command name
+    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+      const candidate = lines[j].trim();
+      if (!/^[a-z][a-z0-9_-]{1,30}$/.test(candidate) || SKIP.has(candidate)) {
+        continue;
+      }
+      if (seen.has(candidate)) {
+        break;
+      }
+      seen.add(candidate);
+
+      // Look ahead for a human-readable description
+      let description = "";
+      for (let k = j + 1; k < Math.min(j + 15, lines.length); k++) {
+        const s = lines[k].trim();
+        if (
+          s.length > 15 &&
+          /^[A-Z]/.test(s) &&
+          !/^[A-Z_]+$/.test(s) &&
+          !s.includes("{") &&
+          !s.includes("(") &&
+          !s.startsWith("local")
+        ) {
+          description = s.slice(0, 120);
+          break;
+        }
+      }
+      commands.push({ name: candidate, slash: `/${candidate}`, description });
+      break;
+    }
+  }
+
+  if (commands.length === 0) {
+    return [];
+  }
+
+  // 5. Persist cache
+  try {
+    fs.writeFileSync(
+      BUILTINS_CACHE_FILE,
+      JSON.stringify({
+        version,
+        extractedAt: new Date().toISOString(),
+        commands,
+      }),
+    );
+  } catch {
+    /* ignore write failures */
+  }
+
+  return commands;
+}
+
 // ── Frontmatter parser ──────────────────────────────────────────────────────
 
-function parseFrontmatterDescription(content: string): string {
+export function parseFrontmatterDescription(content: string): string {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
     return "";

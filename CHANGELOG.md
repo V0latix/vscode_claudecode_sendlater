@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1] — 2026-04-03
+
+### Added
+- **Claude Commands browser — agents & skills** — scans `.claude/agents/*.md` and `.claude/skills/*/SKILL.md` (workspace + global `~/.claude/`) and displays them with dedicated badges (🤖 agents, ⚡ skills).
+- **MCP server discovery** — reads `~/.claude/mcp.json` and workspace `.claude/settings.json` to list configured MCP servers (🔗 mcp category).
+
+### Fixed
+- `datesInRange` now uses UTC methods (`setUTCHours`) to avoid a timezone-induced off-by-one that added an extra day when the host timezone is ahead of UTC.
+
+### Tests
+- 29 new unit tests covering `parseFrontmatterDescription`, `scanAgents`, `scanSkills`, and `scanMcpServers` (`src/test/suite/commands.test.ts`).
+
 ## [0.3.0] — 2026-04-03
 
 ### Added

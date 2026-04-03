@@ -4,7 +4,7 @@
 
 /** Pad a number to 2 digits. */
 function pad2(n: number): string {
-  return n.toString().padStart(2, '0');
+  return n.toString().padStart(2, "0");
 }
 
 /**
@@ -83,9 +83,9 @@ export function isOverdue(notBefore: Date, now = new Date()): boolean {
 export function datesInRange(from: Date, to: Date): string[] {
   const dates: string[] = [];
   const cursor = new Date(from);
-  cursor.setHours(0, 0, 0, 0);
+  cursor.setUTCHours(0, 0, 0, 0);
   const end = new Date(to);
-  end.setHours(23, 59, 59, 999);
+  end.setUTCHours(23, 59, 59, 999);
 
   while (cursor <= end) {
     dates.push(formatDateParam(new Date(cursor)));
@@ -104,7 +104,7 @@ export interface RateLimitInfo {
   /** Portion of the input that matched. */
   rawMatch: string;
   /** How confident we are in the parse. */
-  confidence: 'high' | 'medium' | 'low';
+  confidence: "high" | "medium" | "low";
 }
 
 /**
@@ -124,23 +124,29 @@ export interface RateLimitInfo {
 export function parseRateLimitMessage(text: string): RateLimitInfo | undefined {
   // ── 1. Absolute time: "resets at HH:MM [AM/PM]" ────────────────────────
   const absReset = text.match(
-    /(?:reset(?:s)?|available|try\s+again|retry)\s+at\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i
+    /(?:reset(?:s)?|available|try\s+again|retry)\s+at\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i,
   );
   if (absReset) {
     const info = parseAbsoluteTime(absReset[1], absReset[2], absReset[4], text);
-    if (info) { return info; }
+    if (info) {
+      return info;
+    }
   }
 
   // ── 2. "at HH:MM [AM/PM]" (standalone) ─────────────────────────────────
-  const atTime = text.match(/\bat\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i);
+  const atTime = text.match(
+    /\bat\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i,
+  );
   if (atTime) {
     const info = parseAbsoluteTime(atTime[1], atTime[2], atTime[4], text);
-    if (info) { return { ...info, confidence: 'medium' }; }
+    if (info) {
+      return { ...info, confidence: "medium" };
+    }
   }
 
   // ── 3. Combined relative: "Xh Ym" or "X hours Y minutes" ────────────────
   const combined = text.match(
-    /(\d+)\s*h(?:ours?)?\s+(\d+)\s*m(?:in(?:utes?)?)?/i
+    /(\d+)\s*h(?:ours?)?\s+(\d+)\s*m(?:in(?:utes?)?)?/i,
   );
   if (combined) {
     const h = parseInt(combined[1], 10);
@@ -148,18 +154,18 @@ export function parseRateLimitMessage(text: string): RateLimitInfo | undefined {
     const total = h + m / 60;
     const delayHours = addBuffer(total);
     const resetAt = new Date(Date.now() + delayHours * 3_600_000);
-    return { delayHours, resetAt, rawMatch: combined[0], confidence: 'high' };
+    return { delayHours, resetAt, rawMatch: combined[0], confidence: "high" };
   }
 
   // ── 4. Hours only ───────────────────────────────────────────────────────
   const hoursOnly = text.match(
-    /(?:in|after|for)\s+(\d+(?:\.\d+)?)\s*h(?:ours?)?/i
+    /(?:in|after|for)\s+(\d+(?:\.\d+)?)\s*h(?:ours?)?/i,
   );
   if (hoursOnly) {
     const total = parseFloat(hoursOnly[1]);
     const delayHours = addBuffer(total);
     const resetAt = new Date(Date.now() + delayHours * 3_600_000);
-    return { delayHours, resetAt, rawMatch: hoursOnly[0], confidence: 'high' };
+    return { delayHours, resetAt, rawMatch: hoursOnly[0], confidence: "high" };
   }
 
   // Bare "X hours" without prep word (e.g. "rate limited for 5 hours")
@@ -168,29 +174,44 @@ export function parseRateLimitMessage(text: string): RateLimitInfo | undefined {
     const total = parseFloat(bareHours[1]);
     const delayHours = addBuffer(total);
     const resetAt = new Date(Date.now() + delayHours * 3_600_000);
-    return { delayHours, resetAt, rawMatch: bareHours[0], confidence: 'medium' };
+    return {
+      delayHours,
+      resetAt,
+      rawMatch: bareHours[0],
+      confidence: "medium",
+    };
   }
 
   // ── 5. Minutes only ─────────────────────────────────────────────────────
   const minutesOnly = text.match(
-    /(?:in|after|for)\s+(\d+(?:\.\d+)?)\s*m(?:in(?:utes?)?)?/i
+    /(?:in|after|for)\s+(\d+(?:\.\d+)?)\s*m(?:in(?:utes?)?)?/i,
   );
   if (minutesOnly) {
     const total = parseFloat(minutesOnly[1]) / 60;
     const delayHours = addBuffer(total);
     const resetAt = new Date(Date.now() + delayHours * 3_600_000);
-    return { delayHours, resetAt, rawMatch: minutesOnly[0], confidence: 'high' };
+    return {
+      delayHours,
+      resetAt,
+      rawMatch: minutesOnly[0],
+      confidence: "high",
+    };
   }
 
   // ── 6. Seconds only (short limits) ──────────────────────────────────────
   const secondsOnly = text.match(
-    /(?:in|after|for)\s+(\d+)\s*s(?:ec(?:onds?)?)?/i
+    /(?:in|after|for)\s+(\d+)\s*s(?:ec(?:onds?)?)?/i,
   );
   if (secondsOnly) {
     const total = parseInt(secondsOnly[1], 10) / 3600;
     const delayHours = addBuffer(total);
     const resetAt = new Date(Date.now() + delayHours * 3_600_000);
-    return { delayHours, resetAt, rawMatch: secondsOnly[0], confidence: 'medium' };
+    return {
+      delayHours,
+      resetAt,
+      rawMatch: secondsOnly[0],
+      confidence: "medium",
+    };
   }
 
   return undefined;
@@ -204,11 +225,17 @@ function parseAbsoluteTime(
 ): RateLimitInfo | undefined {
   let hour = parseInt(hourStr, 10);
   const minute = parseInt(minuteStr, 10);
-  if (isNaN(hour) || isNaN(minute)) { return undefined; }
+  if (isNaN(hour) || isNaN(minute)) {
+    return undefined;
+  }
 
   if (ampm) {
-    if (ampm.toLowerCase() === 'pm' && hour !== 12) { hour += 12; }
-    if (ampm.toLowerCase() === 'am' && hour === 12) { hour = 0; }
+    if (ampm.toLowerCase() === "pm" && hour !== 12) {
+      hour += 12;
+    }
+    if (ampm.toLowerCase() === "am" && hour === 12) {
+      hour = 0;
+    }
   }
 
   const now = new Date();
@@ -227,7 +254,7 @@ function parseAbsoluteTime(
     delayHours,
     resetAt,
     rawMatch: rawText.slice(0, 80),
-    confidence: 'high',
+    confidence: "high",
   };
 }
 
