@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **GitHub Actions CI** — `.github/workflows/ci.yml` : compile + test (headless via `xvfb-run`) sur chaque push/PR vers `main`.
+- **GitHub Actions publish** — `.github/workflows/publish.yml` : publication automatique sur VS Code Marketplace (`vsce publish`, secret `VSCE_PAT`) et Open VSX (`ovsx publish`, secret `OVSX_PAT`) à chaque tag `v*`.
+- **README badges** — CI status, Marketplace version, installs et rating.
+
+## [0.3.2] — 2026-04-03
+
+### Added
+- **Queue — Aperçu du prompt** — le texte de chaque item affiché jusqu'à 200 caractères, avec expand/collapse au clic sur la prévisualisation.
+- **Queue — Badge de notification** — le nombre de prompts en attente s'affiche en badge sur l'icône de la vue Activity Bar (via `viewBadge` API, VS Code ≥ 1.83).
+- **Queue — Terminal nommé** — nouveau paramètre `promptQueue.targetTerminalName` pour forcer la livraison vers un terminal spécifique (priorité absolue sur la détection heuristique).
+- **Usage Monitor — Alertes de quota** — notification VS Code `showWarningMessage` quand l'usage 5h dépasse le seuil configurable `usage.quotaAlertThreshold` (défaut 80 %). Ne se déclenche pas deux fois pour le même pourcentage.
+- **Usage Monitor — Sparkline 24h** — graphique en barres des 24 dernières heures dans le panneau Usage, alimenté par les données JSONL locales de Claude Code CLI.
+- **Usage Monitor — Breakdown par modèle** — répartition des tokens 7j par modèle (claude-3-5-sonnet, opus, haiku…) affichée avec mini-barres de progression dans le panneau Usage.
+- **Claude Commands — Prévisualisation inline** — bouton 👁 `preview` sur chaque commande avec fichier source : ouvre un panneau WebView côte à côte avec le contenu markdown rendu (sans ouvrir le fichier brut).
+- **Claude Commands — Créer une commande** — bouton `＋` dans la barre de recherche : demande un nom, génère `.claude/commands/<nom>.md` avec un template YAML frontmatter pré-rempli et l'ouvre dans l'éditeur.
+
+### Tests
+- 25 nouveaux tests unitaires (`src/test/suite/p1features.test.ts`) : frontmatter, logique bucket horaire, validation du nom de commande, troncature preview 200 chars, logique quota alert.
+
 ## [0.3.1] — 2026-04-03
 
 ### Added

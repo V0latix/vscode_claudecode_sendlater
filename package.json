@@ -2,7 +2,7 @@
   "name": "prompt-queue-usage-monitor",
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "v0latix",
   "license": "MIT",
   "repository": {
@@ -113,6 +113,11 @@
           "default": "{timestamp}_{id}.md",
           "description": "Filename template. {timestamp} → YYYYMMDD_HHMM, {id} → short id."
         },
+        "promptQueue.targetTerminalName": {
+          "type": "string",
+          "default": "",
+          "description": "Exact name of the terminal to target when delivering prompts. Leave empty for auto-detection (looks for a Claude terminal)."
+        },
         "openai.orgId": {
           "type": "string",
           "default": "",
@@ -133,6 +138,13 @@
           "default": 10,
           "minimum": 0,
           "description": "Auto-refresh interval for usage data (minutes). Set 0 to disable."
+        },
+        "usage.quotaAlertThreshold": {
+          "type": "number",
+          "default": 80,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Show a warning notification when 5h usage exceeds this % of the configured limit. Set 0 to disable."
         },
         "claude.tokenLimit5h": {
           "type": "number",

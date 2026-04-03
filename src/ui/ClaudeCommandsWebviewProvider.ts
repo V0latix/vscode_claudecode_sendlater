@@ -381,6 +381,13 @@ export class ClaudeCommandsWebviewProvider
         const doc = await vscode.workspace.openTextDocument(msg.path);
         vscode.window.showTextDocument(doc, { preview: true });
       }
+      if (msg.type === "previewFile") {
+        this.previewCommand(msg.path, msg.slash);
+      }
+      if (msg.type === "newCommand") {
+        await this.createNewCommand();
+        this.loadAndRender();
+      }
       if (msg.type === "refresh") {
         this.loadAndRender();
       }
@@ -389,6 +396,79 @@ export class ClaudeCommandsWebviewProvider
 
   refresh(): void {
     this.loadAndRender();
+  }
+
+  /** Open a split WebviewPanel with the markdown content of a command file. */
+  private previewCommand(filePath: string, slash: string): void {
+    let content: string;
+    try {
+      content = fs.readFileSync(filePath, "utf8");
+    } catch {
+      vscode.window.showErrorMessage(`Cannot read file: ${filePath}`);
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      "claudeCommandPreview",
+      `Preview: ${slash}`,
+      vscode.ViewColumn.Beside,
+      { enableScripts: false },
+    );
+
+    panel.webview.html = buildPreviewHtml(slash, content);
+  }
+
+  /** Prompt for a command name and create a new .claude/commands/<name>.md. */
+  private async createNewCommand(): Promise<void> {
+    const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!wsFolder) {
+      vscode.window.showWarningMessage(
+        "Open a workspace folder first to create a command.",
+      );
+      return;
+    }
+
+    const name = await vscode.window.showInputBox({
+      title: "New Claude Command",
+      prompt: "Enter the command name (e.g. my-command → /my-command)",
+      placeHolder: "my-command",
+      validateInput: (v) =>
+        /^[a-z0-9][a-z0-9_-]*$/.test(v.trim())
+          ? null
+          : "Use lowercase letters, digits, hyphens or underscores",
+    });
+    if (!name) {
+      return;
+    }
+
+    const commandsDir = path.join(wsFolder, ".claude", "commands");
+    if (!fs.existsSync(commandsDir)) {
+      fs.mkdirSync(commandsDir, { recursive: true });
+    }
+
+    const filePath = path.join(commandsDir, `${name.trim()}.md`);
+    if (fs.existsSync(filePath)) {
+      vscode.window.showWarningMessage(`Command already exists: /${name}`);
+      return;
+    }
+
+    const template = [
+      "---",
+      `description: ${name} — describe what this command does`,
+      "---",
+      "",
+      `# ${name}`,
+      "",
+      "Your command instructions here.",
+      "Use $ARGUMENTS to refer to any arguments passed after the slash command.",
+      "",
+    ].join("\n");
+
+    fs.writeFileSync(filePath, template, "utf8");
+
+    const doc = await vscode.workspace.openTextDocument(filePath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    vscode.window.showInformationMessage(`Created: /${name}`);
   }
 
   // ── Scanning ───────────────────────────────────────────────────────────────
@@ -688,6 +768,7 @@ export class ClaudeCommandsWebviewProvider
 
 <div class="search-row">
   <input class="search-input" id="searchInput" type="text" placeholder="Filter commands…" autocomplete="off">
+  <button class="btn-icon" id="newCmdBtn" title="New command">＋</button>
   <button class="btn-icon" id="refreshBtn" title="Refresh">↻</button>
 </div>
 
@@ -702,6 +783,7 @@ export class ClaudeCommandsWebviewProvider
   const searchInput   = document.getElementById('searchInput');
   const commandList   = document.getElementById('commandList');
   const refreshBtn    = document.getElementById('refreshBtn');
+  const newCmdBtn     = document.getElementById('newCmdBtn');
   const toast         = document.getElementById('toast');
 
   let query = '';
@@ -713,6 +795,10 @@ export class ClaudeCommandsWebviewProvider
 
   refreshBtn.addEventListener('click', () => {
     vscode.postMessage({ type: 'refresh' });
+  });
+
+  newCmdBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'newCommand' });
   });
 
   function render() {
@@ -765,12 +851,16 @@ export class ClaudeCommandsWebviewProvider
         const openBtn = cmd.filePath
           ? \`<button class="action-btn open-btn" data-path="\${esc(cmd.filePath)}" title="Open file">↗ open</button>\`
           : '';
+        const previewBtn = cmd.filePath
+          ? \`<button class="action-btn preview-btn" data-path="\${esc(cmd.filePath)}" data-slash="\${esc(cmd.slash)}" title="Preview content">👁 preview</button>\`
+          : '';
         html += \`<div class="cmd-card" data-path="\${esc(cmd.filePath || '')}" data-slash="\${esc(cmd.slash)}">
   <div class="cmd-header">
     <span class="cmd-slash">\${slashHl}</span>
     <span class="source-badge \${cmd.source}">\${esc(sourceLabel)}</span>
     <div class="cmd-actions">
       <button class="action-btn copy-btn" data-slash="\${esc(cmd.slash)}" title="Copy slash command">⎘ copy</button>
+      \${previewBtn}
       \${openBtn}
     </div>
   </div>
@@ -796,6 +886,14 @@ export class ClaudeCommandsWebviewProvider
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         vscode.postMessage({ type: 'openFile', path: btn.dataset.path });
+      });
+    });
+
+    // Wire preview buttons
+    commandList.querySelectorAll('.preview-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'previewFile', path: btn.dataset.path, slash: btn.dataset.slash });
       });
     });
 
@@ -1313,4 +1411,56 @@ export function parseFrontmatterDescription(content: string): string {
     return "";
   }
   return descMatch[1].trim().replace(/^["']|["']$/g, "");
+}
+
+// ── Preview panel HTML ────────────────────────────────────────────────────────
+
+function buildPreviewHtml(slash: string, rawContent: string): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // Strip frontmatter for display
+  const body = rawContent.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+
+  // Minimal markdown → HTML (headings, bold, italic, code blocks, inline code, lists)
+  const rendered = esc(body)
+    .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
+    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
+    .replace(/(<li>[\s\S]*?<\/li>)\n(?!<li>)/g, "<ul>$1</ul>\n")
+    .replace(/\n\n/g, "</p><p>")
+    .replace(/\n/g, "<br>");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
+         color: var(--vscode-foreground); background: var(--vscode-editor-background);
+         padding: 20px 24px; line-height: 1.6; max-width: 720px; margin: 0 auto; }
+  h1,h2,h3,h4 { color: var(--vscode-foreground); margin: 1em 0 0.4em; }
+  h1 { font-size: 1.4em; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.3)); padding-bottom: 6px; }
+  h2 { font-size: 1.2em; }
+  code { background: var(--vscode-textCodeBlock-background); padding: 2px 5px; border-radius: 3px;
+         font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; }
+  ul { padding-left: 1.5em; margin: 0.5em 0; }
+  li { margin: 2px 0; }
+  p { margin: 0.6em 0; }
+  .slash-title { font-family: var(--vscode-editor-font-family, monospace);
+                 color: var(--vscode-textLink-foreground, #4fc1ff); font-size: 1.1em;
+                 margin-bottom: 16px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="slash-title">${esc(slash)}</div>
+<p>${rendered}</p>
+</body>
+</html>`;
 }

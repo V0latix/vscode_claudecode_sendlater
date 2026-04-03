@@ -20,20 +20,20 @@
 
 - [x] **Édition in-place** — Bouton ✏ sur chaque item ; ouvre un formulaire inline avec textarea + datetime-local. Sauvegarde via `editItem` → `QueueStore.update()`.
 - [x] **Snooze rapide** — Boutons +15m et +1h sur chaque item. Reporte depuis `max(now, notBefore)` via `snoozeItem` → `QueueStore.update()`.
-- [ ] **Aperçu du prompt** — Tooltip ou expand au survol d'un item pour voir les 200 premiers caractères sans ouvrir le fichier.
-- [ ] **Badge de notification** — Afficher un badge sur l'icône de l'activity bar lors de la livraison d'un item (via `viewBadge` API, dispo depuis VS Code 1.83).
-- [ ] **Support multi-terminal nommé** — Permettre à l'utilisateur de configurer le nom exact du terminal cible (`promptQueue.targetTerminalName`) plutôt que de dépendre de la détection heuristique.
+- [x] **Aperçu du prompt** — Tooltip ou expand au survol d'un item pour voir les 200 premiers caractères sans ouvrir le fichier.
+- [x] **Badge de notification** — Afficher un badge sur l'icône de l'activity bar lors de la livraison d'un item (via `viewBadge` API, dispo depuis VS Code 1.83).
+- [x] **Support multi-terminal nommé** — Permettre à l'utilisateur de configurer le nom exact du terminal cible (`promptQueue.targetTerminalName`) plutôt que de dépendre de la détection heuristique.
 
 ### Usage Monitor
 
-- [ ] **Alertes de quota** — Déclencher une notification VS Code (`vscode.window.showWarningMessage`) quand l'utilisation dépasse un seuil configurable (ex. 80 % sur 5h).
-- [ ] **Sparkline historique** — Graphique en barres minimaliste des dernières 24h dans le panel usage (données déjà disponibles dans `~/.claude/projects/*.jsonl`).
-- [ ] **Breakdown par modèle** — Le `ClaudeLocalProvider` lit déjà `model` dans les JSONL : afficher la répartition claude-3-5-sonnet / claude-opus / haiku dans le panel.
+- [x] **Alertes de quota** — Déclencher une notification VS Code (`vscode.window.showWarningMessage`) quand l'utilisation dépasse un seuil configurable (ex. 80 % sur 5h).
+- [x] **Sparkline historique** — Graphique en barres minimaliste des dernières 24h dans le panel usage (données déjà disponibles dans `~/.claude/projects/*.jsonl`).
+- [x] **Breakdown par modèle** — Le `ClaudeLocalProvider` lit déjà `model` dans les JSONL : afficher la répartition claude-3-5-sonnet / claude-opus / haiku dans le panel.
 
 ### Claude Commands Browser
 
-- [ ] **Prévisualisation inline** — Afficher le contenu complet d'une commande dans un split editor au clic plutôt que d'ouvrir le fichier brut (meilleure lisibilité du markdown).
-- [ ] **Créer une commande depuis le browser** — Bouton "+ New command" qui génère un fichier `.claude/commands/nom.md` avec un template YAML frontmatter pré-rempli.
+- [x] **Prévisualisation inline** — Afficher le contenu complet d'une commande dans un split editor au clic plutôt que d'ouvrir le fichier brut (meilleure lisibilité du markdown).
+- [x] **Créer une commande depuis le browser** — Bouton "+ New command" qui génère un fichier `.claude/commands/nom.md` avec un template YAML frontmatter pré-rempli.
 
 ---
 
@@ -66,10 +66,14 @@
 
 ## P4 — Publication & CI
 
-- [ ] **GitHub Actions — CI** — Ajouter un workflow `.github/workflows/ci.yml` : `npm run compile` + lint sur chaque PR.
-- [ ] **GitHub Actions — publish** — Workflow de publication automatique sur le Marketplace à chaque tag `v*` (via `vsce publish` avec secret `VSCE_PAT`).
-- [ ] **Open VSX** — Publier sur open-vsx.org pour les utilisateurs VSCodium / Gitpod / Eclipse Theia.
-- [ ] **Badges README** — Ajouter badges Marketplace (installs, rating, version) et CI status.
+- [x] **GitHub Actions — CI** — Workflow `.github/workflows/ci.yml` : compile + test (xvfb) sur push/PR vers main.
+- [x] **GitHub Actions — publish** — Workflow `.github/workflows/publish.yml` : publish Marketplace + Open VSX sur tag `v*` (secrets `VSCE_PAT` + `OVSX_PAT`).
+- [x] **Open VSX** — Inclus dans le workflow publish via `ovsx publish`.
+- [x] **Badges README** — CI status + Marketplace version/installs/rating.
+- [ ] **Créer les secrets GitHub** — Les workflows CI/publish sont prêts et le code est en place. Il reste uniquement à créer les deux secrets dans `GitHub → Settings → Secrets → Actions` :
+  - `VSCE_PAT` : Personal Access Token Azure DevOps (dev.azure.com → User Settings → Personal Access Tokens → New Token → scope **Marketplace > Manage**). Attention : l'organisation doit être "All accessible organizations".
+  - `OVSX_PAT` : Token Open VSX depuis open-vsx.org (compte gratuit → User Settings → Access Tokens).
+  - Une fois les deux secrets ajoutés : `git tag v0.3.2 && git push origin v0.3.2` déclenche la publication automatique.
 
 ---
 

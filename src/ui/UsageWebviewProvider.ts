@@ -1,23 +1,28 @@
-import * as vscode from 'vscode';
-import { UsageService } from '../usage/UsageService';
-import { formatDisplayTime } from '../util/time';
+import * as vscode from "vscode";
+import { UsageService } from "../usage/UsageService";
+import { formatDisplayTime } from "../util/time";
 
 interface UpdatePayload {
-  type: 'update';
+  type: "update";
   tokens5h: number;
   tokens7d: number;
   limit5h: number;
   limitWeekly: number;
   lastRefreshed: string | null;
   providers: Array<{ name: string; ok: boolean; detail: string }>;
+  modelBreakdown: Array<{ model: string; tokens: number; pct: number }>;
+  hourlyLast24h: number[];
 }
 
 export class UsageWebviewProvider implements vscode.WebviewViewProvider {
-  static readonly viewType = 'usageMonitorView';
+  static readonly viewType = "usageMonitorView";
   private _view?: vscode.WebviewView;
 
   constructor(private readonly service: UsageService) {
-    service.onDidChange(() => this.push());
+    service.onDidChange((data) => {
+      this.checkQuotaAlert(data);
+      this.push();
+    });
   }
 
   resolveWebviewView(
@@ -30,13 +35,19 @@ export class UsageWebviewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = buildHtml();
 
     webviewView.webview.onDidReceiveMessage((msg: { type: string }) => {
-      if (msg.type === 'ready') { this.push(); }
-      else if (msg.type === 'refresh') { vscode.commands.executeCommand('usage.refresh'); }
-      else if (msg.type === 'setLimits') { this.promptSetLimits(); }
+      if (msg.type === "ready") {
+        this.push();
+      } else if (msg.type === "refresh") {
+        vscode.commands.executeCommand("usage.refresh");
+      } else if (msg.type === "setLimits") {
+        this.promptSetLimits();
+      }
     });
 
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) { this.push(); }
+      if (webviewView.visible) {
+        this.push();
+      }
     });
   }
 
@@ -47,63 +58,131 @@ export class UsageWebviewProvider implements vscode.WebviewViewProvider {
     const tokens7d = data?.bestTokensLast7d ?? 0;
 
     const pct5hStr = await vscode.window.showInputBox({
-      title: 'Calibrate — 5h window',
+      title: "Calibrate — 5h window",
       prompt: `Extension shows ${fmtTok(tokens5h)} tokens for the last 5h. What % does claude.ai show?`,
-      placeHolder: 'e.g. 89',
-      validateInput: v => {
+      placeHolder: "e.g. 89",
+      validateInput: (v) => {
         const n = parseFloat(v);
-        return !v || (n > 0 && n <= 100) ? null : 'Enter a % between 1 and 100';
+        return !v || (n > 0 && n <= 100) ? null : "Enter a % between 1 and 100";
       },
     });
-    if (pct5hStr === undefined) { return; }
+    if (pct5hStr === undefined) {
+      return;
+    }
 
     const pct7dStr = await vscode.window.showInputBox({
-      title: 'Calibrate — weekly window',
+      title: "Calibrate — weekly window",
       prompt: `Extension shows ${fmtTok(tokens7d)} tokens for the last 7d. What % does claude.ai show?`,
-      placeHolder: 'e.g. 53',
-      validateInput: v => {
+      placeHolder: "e.g. 53",
+      validateInput: (v) => {
         const n = parseFloat(v);
-        return !v || (n > 0 && n <= 100) ? null : 'Enter a % between 1 and 100';
+        return !v || (n > 0 && n <= 100) ? null : "Enter a % between 1 and 100";
       },
     });
-    if (pct7dStr === undefined) { return; }
+    if (pct7dStr === undefined) {
+      return;
+    }
 
     const pct5h = parseFloat(pct5hStr) / 100;
     const pct7d = parseFloat(pct7dStr) / 100;
     const limit5h = pct5h > 0 ? Math.round(tokens5h / pct5h) : 0;
     const limitWeekly = pct7d > 0 ? Math.round(tokens7d / pct7d) : 0;
 
-    const cfg = vscode.workspace.getConfiguration('claude');
-    if (limit5h > 0) { await cfg.update('tokenLimit5h', limit5h, vscode.ConfigurationTarget.Global); }
-    if (limitWeekly > 0) { await cfg.update('tokenLimitWeekly', limitWeekly, vscode.ConfigurationTarget.Global); }
+    const cfg = vscode.workspace.getConfiguration("claude");
+    if (limit5h > 0) {
+      await cfg.update(
+        "tokenLimit5h",
+        limit5h,
+        vscode.ConfigurationTarget.Global,
+      );
+    }
+    if (limitWeekly > 0) {
+      await cfg.update(
+        "tokenLimitWeekly",
+        limitWeekly,
+        vscode.ConfigurationTarget.Global,
+      );
+    }
 
     vscode.window.showInformationMessage(
-      `Limits calibrated — 5h: ${fmtTok(limit5h)}, weekly: ${fmtTok(limitWeekly)} tokens`
+      `Limits calibrated — 5h: ${fmtTok(limit5h)}, weekly: ${fmtTok(limitWeekly)} tokens`,
     );
     this.push();
   }
 
+  private _lastAlertPct = -1;
+
+  /**
+   * Quota alert — runs on every refresh, regardless of panel visibility.
+   * Fires at most once per distinct percentage point above the threshold.
+   */
+  private checkQuotaAlert(
+    data: import("../usage/UsageService").AggregatedUsage,
+  ): void {
+    const usageCfg = vscode.workspace.getConfiguration("usage");
+    const alertThreshold: number = usageCfg.get("quotaAlertThreshold", 80);
+    if (alertThreshold <= 0) {
+      return;
+    }
+    const limit5h: number = vscode.workspace
+      .getConfiguration("claude")
+      .get("tokenLimit5h", 0);
+    const tokens5h = data.bestTokensLast5h;
+    if (limit5h <= 0 || tokens5h <= 0) {
+      return;
+    }
+
+    const pct = Math.round((tokens5h / limit5h) * 100);
+    if (pct >= alertThreshold && pct !== this._lastAlertPct) {
+      this._lastAlertPct = pct;
+      vscode.window.showWarningMessage(
+        `⚠️ Claude usage at ${pct}% of 5h quota (${fmtTok(tokens5h)} / ${fmtTok(limit5h)} tokens)`,
+        "Dismiss",
+      );
+    }
+  }
+
   private push(): void {
-    if (!this._view?.visible) { return; }
+    if (!this._view?.visible) {
+      return;
+    }
     const data = this.service.getCached();
-    const cfg = vscode.workspace.getConfiguration('claude');
-    const limit5h: number = cfg.get('tokenLimit5h', 0);
-    const limitWeekly: number = cfg.get('tokenLimitWeekly', 0);
+    const cfg = vscode.workspace.getConfiguration("claude");
+    const limit5h: number = cfg.get("tokenLimit5h", 0);
+    const limitWeekly: number = cfg.get("tokenLimitWeekly", 0);
+
+    const tokens5h = data?.bestTokensLast5h ?? 0;
+
+    // Model breakdown (top 5, with % of 7d total)
+    const totalTok =
+      data?.modelBreakdown?.reduce((s, b) => s + b.tokens, 0) ?? 0;
+    const modelBreakdown = (data?.modelBreakdown ?? [])
+      .slice(0, 5)
+      .map((b) => ({
+        model: b.model,
+        tokens: b.tokens,
+        pct: totalTok > 0 ? Math.round((b.tokens / totalTok) * 100) : 0,
+      }));
 
     const payload: UpdatePayload = {
-      type: 'update',
-      tokens5h: data?.bestTokensLast5h ?? 0,
+      type: "update",
+      tokens5h,
       tokens7d: data?.bestTokensLast7d ?? 0,
       limit5h,
       limitWeekly,
-      lastRefreshed: data?.lastRefreshed ? formatDisplayTime(data.lastRefreshed) : null,
-      providers: data?.providers.map(p => ({
-        name: p.name,
-        ok: !p.usage.error,
-        detail: p.usage.error
-          ? p.usage.error.slice(0, 55)
-          : `${fmtTok(p.usage.tokensLast7d)} tok/7d`,
-      })) ?? [],
+      lastRefreshed: data?.lastRefreshed
+        ? formatDisplayTime(data.lastRefreshed)
+        : null,
+      providers:
+        data?.providers.map((p) => ({
+          name: p.name,
+          ok: !p.usage.error,
+          detail: p.usage.error
+            ? p.usage.error.slice(0, 55)
+            : `${fmtTok(p.usage.tokensLast7d)} tok/7d`,
+        })) ?? [],
+      modelBreakdown,
+      hourlyLast24h: data?.hourlyLast24h ?? [],
     };
 
     this._view.webview.postMessage(payload);
@@ -113,15 +192,19 @@ export class UsageWebviewProvider implements vscode.WebviewViewProvider {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTok(n: number): string {
-  if (n >= 1_000_000) { return `${(n / 1_000_000).toFixed(1)}M`; }
-  if (n >= 1_000) { return `${(n / 1_000).toFixed(0)}K`; }
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    return `${(n / 1_000).toFixed(0)}K`;
+  }
   return n.toString();
 }
 
 // ── HTML template ─────────────────────────────────────────────────────────────
 
 function buildHtml(): string {
-  return /* html */`<!DOCTYPE html>
+  return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -199,6 +282,68 @@ function buildHtml(): string {
     margin: 10px 0 2px;
     font-size: 11px;
     color: var(--vscode-descriptionForeground);
+  }
+
+  /* ── Sparkline ───────────────────────────────────── */
+  .sparkline {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 28px;
+    margin-bottom: 4px;
+  }
+  .spark-bar {
+    flex: 1;
+    min-width: 2px;
+    background: var(--vscode-charts-blue, #4fc1ff);
+    border-radius: 1px 1px 0 0;
+    opacity: 0.7;
+    min-height: 1px;
+    transition: opacity .1s;
+  }
+  .spark-bar:hover { opacity: 1; }
+  .spark-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.6;
+    margin-bottom: 8px;
+  }
+
+  /* ── Model breakdown ─────────────────────────────── */
+  .model-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    padding: 1px 0;
+  }
+  .model-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .model-pct {
+    font-weight: 600;
+    color: var(--vscode-foreground);
+    min-width: 28px;
+    text-align: right;
+  }
+  .model-bar-track {
+    width: 40px;
+    height: 4px;
+    background: rgba(121,121,121,0.2);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .model-bar-fill {
+    height: 100%;
+    background: var(--vscode-charts-blue, #4fc1ff);
+    border-radius: 2px;
   }
 
   /* ── Divider ─────────────────────────────────────── */
@@ -306,10 +451,29 @@ function buildHtml(): string {
     <button class="btn-primary" onclick="setLimits()">⚙ Calibrate</button>
   </div>
 
+  <!-- Sparkline 24h -->
+  <div id="sparkline-block" style="display:none">
+    <div class="divider"></div>
+    <div class="block-header" style="margin-bottom:4px">
+      <span><span class="icon">📊</span>Last 24h</span>
+    </div>
+    <div class="sparkline" id="sparkline"></div>
+    <div class="spark-labels"><span>-24h</span><span>-12h</span><span>now</span></div>
+  </div>
+
   <div class="divider"></div>
 
   <!-- Providers -->
   <div id="providers"></div>
+
+  <!-- Model breakdown -->
+  <div id="model-breakdown-block" style="display:none">
+    <div class="divider"></div>
+    <div class="block-header" style="margin-bottom:4px">
+      <span><span class="icon">🤖</span>By model (7d)</span>
+    </div>
+    <div id="model-breakdown"></div>
+  </div>
 
   <!-- Footer -->
   <div class="footer">
@@ -381,6 +545,57 @@ function buildHtml(): string {
         '<span class="provider-detail">' + p.detail + '</span>' +
       '</div>'
     ).join('');
+
+    // Sparkline
+    if (d.hourlyLast24h && d.hourlyLast24h.length === 24) {
+      const maxVal = Math.max(1, ...d.hourlyLast24h);
+      const sparkEl = document.getElementById('sparkline');
+      sparkEl.innerHTML = d.hourlyLast24h.map((v, i) => {
+        const h = Math.max(1, Math.round((v / maxVal) * 100));
+        const label = fmt(v) + ' tok (' + (23 - i) + 'h ago)';
+        return '<div class="spark-bar" style="height:' + h + '%" title="' + label + '"></div>';
+      }).join('');
+      document.getElementById('sparkline-block').style.display = '';
+    } else {
+      document.getElementById('sparkline-block').style.display = 'none';
+    }
+
+    // Model breakdown — use DOM APIs to avoid innerHTML injection
+    const mbBlock = document.getElementById('model-breakdown-block');
+    const mbEl    = document.getElementById('model-breakdown');
+    mbEl.textContent = '';
+    if (d.modelBreakdown && d.modelBreakdown.length > 0) {
+      for (const m of d.modelBreakdown) {
+        const shortName = m.model.replace(/^claude-/, '').slice(0, 30);
+
+        const row = document.createElement('div');
+        row.className = 'model-row';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'model-name';
+        nameSpan.title = m.model;          // safe: setAttribute-equivalent
+        nameSpan.textContent = shortName;  // safe: textContent
+
+        const track = document.createElement('div');
+        track.className = 'model-bar-track';
+        const fill = document.createElement('div');
+        fill.className = 'model-bar-fill';
+        fill.style.width = Math.min(100, Math.max(0, m.pct)) + '%'; // numeric, clamped
+        track.appendChild(fill);
+
+        const pctSpan = document.createElement('span');
+        pctSpan.className = 'model-pct';
+        pctSpan.textContent = m.pct + '%'; // safe: textContent
+
+        row.appendChild(nameSpan);
+        row.appendChild(track);
+        row.appendChild(pctSpan);
+        mbEl.appendChild(row);
+      }
+      mbBlock.style.display = '';
+    } else {
+      mbBlock.style.display = 'none';
+    }
   });
 
   function refresh()   { vscode.postMessage({ type: 'refresh' }); }

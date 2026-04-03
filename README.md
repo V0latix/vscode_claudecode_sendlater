@@ -1,5 +1,10 @@
 # Prompt Queue + Usage Monitor
 
+[![CI](https://github.com/V0latix/vscode_claudecode_sendlater/actions/workflows/ci.yml/badge.svg)](https://github.com/V0latix/vscode_claudecode_sendlater/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/visual-studio-marketplace/v/v0latix.prompt-queue-usage-monitor)](https://marketplace.visualstudio.com/items?itemName=v0latix.prompt-queue-usage-monitor)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/v0latix.prompt-queue-usage-monitor)](https://marketplace.visualstudio.com/items?itemName=v0latix.prompt-queue-usage-monitor)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/v0latix.prompt-queue-usage-monitor)](https://marketplace.visualstudio.com/items?itemName=v0latix.prompt-queue-usage-monitor)
+
 > Queue prompts for later · Monitor AI token usage · Browse Claude slash commands
 
 A VS Code extension built for developers who use Claude Code, Copilot, or any AI assistant with rate limits. When you're blocked, queue your next prompt — the extension delivers it automatically when the time comes.

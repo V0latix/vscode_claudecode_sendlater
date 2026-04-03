@@ -20,15 +20,30 @@ export interface TokenUsage {
   error?: string;
   /** True if the API has a known data lag (e.g. a few minutes behind). */
   dataDelay?: boolean;
+  /**
+   * Token counts per hour for the last 24 hours.
+   * Array of 24 values, index 0 = oldest hour (23-24h ago), index 23 = current hour (0-1h ago).
+   */
+  hourlyLast24h?: number[];
   /** Session (last 5h / per-session) quota from claude.ai. */
-  sessionUsage?: { used: number; limit: number; percent: number; resetAt: Date | null };
+  sessionUsage?: {
+    used: number;
+    limit: number;
+    percent: number;
+    resetAt: Date | null;
+  };
   /** Weekly quota from claude.ai. */
-  weeklyUsage?: { used: number; limit: number; percent: number; resetAt: Date | null };
+  weeklyUsage?: {
+    used: number;
+    limit: number;
+    percent: number;
+    resetAt: Date | null;
+  };
   /** Opus-specific quota from claude.ai. */
   opusUsage?: { used: number; limit: number; percent: number };
 }
 
-export type ProviderStatus = 'ok' | 'no-key' | 'error' | 'unconfigured';
+export type ProviderStatus = "ok" | "no-key" | "error" | "unconfigured";
 
 export interface IUsageProvider {
   /** Human-readable name shown in the UI. */

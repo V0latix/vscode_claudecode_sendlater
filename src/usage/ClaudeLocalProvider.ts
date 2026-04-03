@@ -13,14 +13,19 @@
  *   - Covers all Claude Code CLI sessions, not just queued prompts
  *   - Zero network calls, zero credentials needed
  */
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as vscode from 'vscode';
-import { IUsageProvider, TokenUsage, ProviderStatus, ModelBreakdown } from './IUsageProvider';
-import { getWindowStart5h, getWindowStart7d } from '../util/time';
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import * as vscode from "vscode";
+import {
+  IUsageProvider,
+  TokenUsage,
+  ProviderStatus,
+  ModelBreakdown,
+} from "./IUsageProvider";
+import { getWindowStart5h, getWindowStart7d } from "../util/time";
 
-const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
+const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
 
 interface JournalEntry {
   timestamp?: string;
@@ -36,8 +41,8 @@ interface JournalEntry {
 }
 
 export class ClaudeLocalProvider implements IUsageProvider {
-  readonly name = 'Claude (local)';
-  private status: ProviderStatus = 'unconfigured';
+  readonly name = "Claude (local)";
+  private status: ProviderStatus = "unconfigured";
   private readonly log: vscode.OutputChannel;
 
   constructor(log: vscode.OutputChannel) {
@@ -54,34 +59,39 @@ export class ClaudeLocalProvider implements IUsageProvider {
 
   async fetchUsage(): Promise<TokenUsage> {
     if (!fs.existsSync(CLAUDE_DIR)) {
-      this.status = 'unconfigured';
+      this.status = "unconfigured";
       return {
         tokensLast5h: 0,
         tokensLast7d: 0,
         lastUpdated: new Date(),
-        error: 'Claude Code CLI not found (~/.claude/projects missing).',
+        error: "Claude Code CLI not found (~/.claude/projects missing).",
       };
     }
 
     const now = new Date();
     const start5h = getWindowStart5h(now).getTime();
     const start7d = getWindowStart7d(now).getTime();
+    const start24h = now.getTime() - 24 * 3_600_000;
 
     let tokens5h = 0;
     let tokens7d = 0;
     const breakdownMap = new Map<string, number>();
+    // 24 hourly buckets: index 0 = oldest (23-24h ago), index 23 = current hour (0-1h ago)
+    const hourlyBuckets = new Array<number>(24).fill(0);
 
     try {
-      const sessionDirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .map(e => path.join(CLAUDE_DIR, e.name));
+      const sessionDirs = fs
+        .readdirSync(CLAUDE_DIR, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => path.join(CLAUDE_DIR, e.name));
 
       for (const dir of sessionDirs) {
         let files: string[];
         try {
-          files = fs.readdirSync(dir)
-            .filter(f => f.endsWith('.jsonl'))
-            .map(f => path.join(dir, f));
+          files = fs
+            .readdirSync(dir)
+            .filter((f) => f.endsWith(".jsonl"))
+            .map((f) => path.join(dir, f));
         } catch {
           continue;
         }
@@ -90,26 +100,45 @@ export class ClaudeLocalProvider implements IUsageProvider {
           // Skip files older than 7 days (mtime check avoids reading old files)
           try {
             const stat = fs.statSync(file);
-            if (stat.mtimeMs < start7d) { continue; }
+            if (stat.mtimeMs < start7d) {
+              continue;
+            }
           } catch {
             continue;
           }
 
           try {
-            const content = fs.readFileSync(file, 'utf8');
-            for (const line of content.split('\n')) {
-              if (!line.trim()) { continue; }
-              this.processLine(line, start5h, start7d, breakdownMap,
-                (t5, t7) => { tokens5h += t5; tokens7d += t7; });
+            const content = fs.readFileSync(file, "utf8");
+            for (const line of content.split("\n")) {
+              if (!line.trim()) {
+                continue;
+              }
+              this.processLine(
+                line,
+                start5h,
+                start7d,
+                start24h,
+                now.getTime(),
+                breakdownMap,
+                hourlyBuckets,
+                (t5, t7) => {
+                  tokens5h += t5;
+                  tokens7d += t7;
+                },
+              );
             }
           } catch (err) {
-            this.log.appendLine(`[ClaudeLocalProvider] Error reading ${file}: ${err}`);
+            this.log.appendLine(
+              `[ClaudeLocalProvider] Error reading ${file}: ${err}`,
+            );
           }
         }
       }
     } catch (err) {
-      this.log.appendLine(`[ClaudeLocalProvider] Error scanning ${CLAUDE_DIR}: ${err}`);
-      this.status = 'error';
+      this.log.appendLine(
+        `[ClaudeLocalProvider] Error scanning ${CLAUDE_DIR}: ${err}`,
+      );
+      this.status = "error";
       return {
         tokensLast5h: 0,
         tokensLast7d: 0,
@@ -122,12 +151,13 @@ export class ClaudeLocalProvider implements IUsageProvider {
       .map(([model, tokens]) => ({ model, tokens }))
       .sort((a, b) => b.tokens - a.tokens);
 
-    this.status = 'ok';
+    this.status = "ok";
     return {
       tokensLast5h: tokens5h,
       tokensLast7d: tokens7d,
       lastUpdated: new Date(),
       breakdown,
+      hourlyLast24h: hourlyBuckets,
     };
   }
 
@@ -135,7 +165,10 @@ export class ClaudeLocalProvider implements IUsageProvider {
     line: string,
     start5h: number,
     start7d: number,
+    start24h: number,
+    nowMs: number,
     breakdownMap: Map<string, number>,
+    hourlyBuckets: number[],
     addTokens: (t5: number, t7: number) => void,
   ): void {
     let entry: JournalEntry;
@@ -145,10 +178,14 @@ export class ClaudeLocalProvider implements IUsageProvider {
       return;
     }
 
-    if (!entry.timestamp || !entry.message?.usage) { return; }
+    if (!entry.timestamp || !entry.message?.usage) {
+      return;
+    }
 
     const ts = new Date(entry.timestamp).getTime();
-    if (isNaN(ts) || ts < start7d) { return; }
+    if (isNaN(ts) || ts < start7d) {
+      return;
+    }
 
     const u = entry.message.usage;
     const total =
@@ -157,11 +194,22 @@ export class ClaudeLocalProvider implements IUsageProvider {
       (u.cache_creation_input_tokens ?? 0) +
       (u.cache_read_input_tokens ?? 0);
 
-    if (total === 0) { return; }
+    if (total === 0) {
+      return;
+    }
 
     addTokens(ts >= start5h ? total : 0, total);
 
-    const model = entry.message.model ?? 'unknown';
+    // Hourly bucket (index 23 = most recent hour).
+    // Guard against future timestamps (clock skew): skip entries with ts > nowMs.
+    if (ts >= start24h && ts <= nowMs) {
+      const ageMs = nowMs - ts; // always >= 0 here
+      const rawIndex = 23 - Math.floor(ageMs / 3_600_000);
+      const hourIndex = Math.max(0, Math.min(23, rawIndex)); // clamp to [0, 23]
+      hourlyBuckets[hourIndex] += total;
+    }
+
+    const model = entry.message.model ?? "unknown";
     breakdownMap.set(model, (breakdownMap.get(model) ?? 0) + total);
   }
 }

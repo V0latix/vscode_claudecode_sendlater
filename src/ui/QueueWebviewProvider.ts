@@ -74,6 +74,17 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     this.sendQueue();
   }
 
+  private updateBadge(): void {
+    if (!this._view) {
+      return;
+    }
+    const pending = this.store.getPending().length;
+    this._view.badge =
+      pending > 0
+        ? { value: pending, tooltip: `${pending} prompt(s) queued` }
+        : undefined;
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private post(msg: OutMsg): void {
@@ -81,6 +92,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private sendQueue(): void {
+    this.updateBadge();
     this.post({ type: "queueUpdated", items: this.store.getAll() });
   }
 
@@ -523,6 +535,14 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: default;
+  }
+  .queue-item.expanded .item-preview {
+    white-space: pre-wrap;
+    overflow: visible;
+    text-overflow: clip;
+    max-height: 120px;
+    overflow-y: auto;
   }
   .item-actions {
     display: flex;
@@ -957,8 +977,8 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         ? 'Delivered ' + formatTime(new Date(item.notBefore))
         : formatTime(new Date(item.notBefore));
       const timeCls = item.processed ? 'item-time delivered-label' : 'item-time';
-      const preview = (item.promptText || '').replace(/\\n/g, ' ').slice(0, 72);
-      const previewTrunc = item.promptText.length > 72 ? preview + '…' : preview;
+      const preview = (item.promptText || '').replace(/\\n/g, ' ').slice(0, 200);
+      const previewTrunc = item.promptText.length > 200 ? preview + '…' : preview;
       const isEditing = editingId === item.id;
 
       const editForm = isEditing ? \`<div class="edit-form">
@@ -1044,6 +1064,14 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         vscode.postMessage({ type: 'deleteItem', id: btn.dataset.id });
+      });
+    });
+
+    // Click on preview → toggle expand
+    queueList.querySelectorAll('.item-preview').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        el.closest('.queue-item').classList.toggle('expanded');
       });
     });
   }
