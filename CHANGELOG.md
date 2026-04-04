@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.4] — 2026-04-04
+
+### Fixed
+- **`detectWindowStart` extraction** — la fonction de détection de fenêtre de taux est désormais une fonction pure exportée depuis `src/util/windowDetection.ts` (au lieu d'une méthode privée non testable dans `ClaudeLocalProvider`). Les tests ciblent maintenant la vraie implémentation.
+- **Effet de bord supprimé** — l'effacement de `_windowHint` après expiration a été déplacé dans `fetchUsage()` ; `detectWindowStart` reste une fonction pure sans mutation de l'état.
+- **Debounce sur `setWindowHint()`** — `UsageService.setWindowHint()` ignore les appels concurrents (flag `_refreshing`) pour éviter les refreshs empilés lors de messages rate-limit rapprochés.
+- **Affichage "fresh window" trompeur** — le compteur de fenêtre affiche désormais `"—"` (aucun historique) quand aucun token 7j n'est détecté, au lieu de `"fresh window"` qui suggérait incorrectement une fenêtre active vide.
+
+### Tests
+- Les tests de détection de fenêtre (suite `detectWindowStart`) importent et appellent la vraie fonction exportée ; les deux tests de hint testent maintenant le comportement réel (hint futur prioritaire, hint expiré ignoré).
+
 ## [0.3.3] — 2026-04-04
 
 ### Added

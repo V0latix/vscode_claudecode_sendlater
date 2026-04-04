@@ -12,6 +12,8 @@ interface UpdatePayload {
   providers: Array<{ name: string; ok: boolean; detail: string }>;
   modelBreakdown: Array<{ model: string; tokens: number; pct: number }>;
   hourlyLast24h: number[];
+  /** Epoch ms of the window reset, or null if no active window. */
+  windowResetAt: number | null;
 }
 
 export class UsageWebviewProvider implements vscode.WebviewViewProvider {
@@ -183,6 +185,7 @@ export class UsageWebviewProvider implements vscode.WebviewViewProvider {
         })) ?? [],
       modelBreakdown,
       hourlyLast24h: data?.hourlyLast24h ?? [],
+      windowResetAt: data?.bestWindowEnd ? data.bestWindowEnd.getTime() : null,
     };
 
     this._view.webview.postMessage(payload);
@@ -531,6 +534,29 @@ function buildHtml(): string {
 
     renderWindow('5h', d.tokens5h, d.limit5h);
     renderWindow('7d', d.tokens7d, d.limitWeekly);
+
+    // Window reset countdown
+    const age5hEl = document.getElementById('age5h');
+    if (age5hEl) {
+      if (d.windowResetAt) {
+        const diffMs = d.windowResetAt - Date.now();
+        if (diffMs > 0) {
+          const h = Math.floor(diffMs / 3_600_000);
+          const m = Math.floor((diffMs % 3_600_000) / 60_000);
+          age5hEl.textContent = h > 0 ? 'resets in ' + h + 'h ' + m + 'm' : 'resets in ' + m + 'm';
+          age5hEl.title = 'Resets at ' + new Date(d.windowResetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else {
+          age5hEl.textContent = 'window reset';
+          age5hEl.title = '';
+        }
+      } else if (d.tokens7d > 0) {
+        age5hEl.textContent = 'fresh window';
+        age5hEl.title = 'No tokens used yet in current window';
+      } else {
+        age5hEl.textContent = '—';
+        age5hEl.title = 'No usage history found';
+      }
+    }
 
     const noLimits = !d.limit5h && !d.limitWeekly;
     noLimits ? show('calibrate-notice') : hide('calibrate-notice');

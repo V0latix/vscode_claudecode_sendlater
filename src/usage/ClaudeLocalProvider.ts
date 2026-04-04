@@ -8,10 +8,12 @@
  *   { timestamp: "ISO 8601", message: { usage: { input_tokens, output_tokens,
  *     cache_creation_input_tokens, cache_read_input_tokens }, model } }
  *
- * Advantages over LocalEstimateProvider:
- *   - Uses actual token counts, not chars/4 estimates
- *   - Covers all Claude Code CLI sessions, not just queued prompts
- *   - Zero network calls, zero credentials needed
+ * Window detection:
+ *   Claude's rate-limit window is anchored at the first request in a session,
+ *   NOT a rolling "last 5 hours". This provider detects the actual window start
+ *   by scanning for gaps ≥ 5h between consecutive JSONL entries. A known
+ *   reset time (from a parsed rate-limit message) can also be injected via
+ *   setWindowHint() for higher accuracy.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -23,9 +25,12 @@ import {
   ProviderStatus,
   ModelBreakdown,
 } from "./IUsageProvider";
-import { getWindowStart5h, getWindowStart7d } from "../util/time";
+import { getWindowStart7d } from "../util/time";
+import { detectWindowStart, FIVE_HOURS_MS } from "../util/windowDetection";
 
 const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
+/** How far back to read entries for window-start detection (must be > 5h). */
+const WINDOW_LOOKBACK_MS = 12 * 3_600_000;
 
 interface JournalEntry {
   timestamp?: string;
@@ -40,13 +45,38 @@ interface JournalEntry {
   };
 }
 
+interface ParsedEntry {
+  ts: number;
+  tokens: number;
+  model: string;
+}
+
 export class ClaudeLocalProvider implements IUsageProvider {
   readonly name = "Claude (local)";
   private status: ProviderStatus = "unconfigured";
   private readonly log: vscode.OutputChannel;
 
+  /**
+   * Hint from a parsed rate-limit message: the time when the current window
+   * resets. When set and still in the future, this takes priority over
+   * gap-based window detection.
+   */
+  private _windowHint?: Date;
+
   constructor(log: vscode.OutputChannel) {
     this.log = log;
+  }
+
+  /**
+   * Inject a known window reset time (from parseRateLimitMessage).
+   * Call this whenever the user gets rate-limited so the window calculation
+   * is anchored to Claude's actual counter rather than a JSONL heuristic.
+   */
+  setWindowHint(resetAt: Date): void {
+    this._windowHint = resetAt;
+    this.log.appendLine(
+      `[ClaudeLocalProvider] Window hint set: resets at ${resetAt.toISOString()}`,
+    );
   }
 
   async isConfigured(): Promise<boolean> {
@@ -69,14 +99,14 @@ export class ClaudeLocalProvider implements IUsageProvider {
     }
 
     const now = new Date();
-    const start5h = getWindowStart5h(now).getTime();
+    const nowMs = now.getTime();
     const start7d = getWindowStart7d(now).getTime();
-    const start24h = now.getTime() - 24 * 3_600_000;
+    const start12h = nowMs - WINDOW_LOOKBACK_MS;
+    const start24h = nowMs - 24 * 3_600_000;
 
-    let tokens5h = 0;
+    const recentEntries: ParsedEntry[] = []; // last 12h — used for window detection
     let tokens7d = 0;
     const breakdownMap = new Map<string, number>();
-    // 24 hourly buckets: index 0 = oldest (23-24h ago), index 23 = current hour (0-1h ago)
     const hourlyBuckets = new Array<number>(24).fill(0);
 
     try {
@@ -113,19 +143,32 @@ export class ClaudeLocalProvider implements IUsageProvider {
               if (!line.trim()) {
                 continue;
               }
-              this.processLine(
-                line,
-                start5h,
-                start7d,
-                start24h,
-                now.getTime(),
-                breakdownMap,
-                hourlyBuckets,
-                (t5, t7) => {
-                  tokens5h += t5;
-                  tokens7d += t7;
-                },
+              const parsed = this.parseLine(line);
+              if (!parsed || parsed.ts < start7d) {
+                continue;
+              }
+
+              // 7-day aggregate + model breakdown
+              tokens7d += parsed.tokens;
+              breakdownMap.set(
+                parsed.model,
+                (breakdownMap.get(parsed.model) ?? 0) + parsed.tokens,
               );
+
+              // 24h sparkline
+              if (parsed.ts >= start24h && parsed.ts <= nowMs) {
+                const ageMs = nowMs - parsed.ts;
+                const idx = Math.max(
+                  0,
+                  Math.min(23, 23 - Math.floor(ageMs / 3_600_000)),
+                );
+                hourlyBuckets[idx] += parsed.tokens;
+              }
+
+              // Collect for window detection
+              if (parsed.ts >= start12h) {
+                recentEntries.push(parsed);
+              }
             }
           } catch (err) {
             this.log.appendLine(
@@ -147,69 +190,74 @@ export class ClaudeLocalProvider implements IUsageProvider {
       };
     }
 
+    // ── Window detection ────────────────────────────────────────────────────
+    recentEntries.sort((a, b) => a.ts - b.ts);
+
+    const hintResetMs = this._windowHint?.getTime();
+    const windowStartMs = detectWindowStart(recentEntries, nowMs, hintResetMs);
+
+    // Clear hint once it expires (pure function can't do this itself)
+    if (this._windowHint && this._windowHint.getTime() <= nowMs) {
+      this._windowHint = undefined;
+    }
+    const windowEndMs =
+      windowStartMs !== null ? windowStartMs + FIVE_HOURS_MS : null;
+
+    // Tokens in the current rate-limit window
+    const tokensInWindow =
+      windowStartMs !== null
+        ? recentEntries
+            .filter((e) => e.ts >= windowStartMs && e.ts <= nowMs)
+            .reduce((sum, e) => sum + e.tokens, 0)
+        : 0;
+
     const breakdown: ModelBreakdown[] = Array.from(breakdownMap.entries())
       .map(([model, tokens]) => ({ model, tokens }))
       .sort((a, b) => b.tokens - a.tokens);
 
     this.status = "ok";
     return {
-      tokensLast5h: tokens5h,
+      tokensLast5h: tokensInWindow,
       tokensLast7d: tokens7d,
-      lastUpdated: new Date(),
+      lastUpdated: now,
       breakdown,
       hourlyLast24h: hourlyBuckets,
+      currentWindowStart:
+        windowStartMs !== null ? new Date(windowStartMs) : undefined,
+      currentWindowEnd:
+        windowEndMs !== null ? new Date(windowEndMs) : undefined,
     };
   }
 
-  private processLine(
-    line: string,
-    start5h: number,
-    start7d: number,
-    start24h: number,
-    nowMs: number,
-    breakdownMap: Map<string, number>,
-    hourlyBuckets: number[],
-    addTokens: (t5: number, t7: number) => void,
-  ): void {
+  /** Parse a single JSONL line. Returns null if the line is not a token-bearing entry. */
+  private parseLine(line: string): ParsedEntry | null {
     let entry: JournalEntry;
     try {
       entry = JSON.parse(line) as JournalEntry;
     } catch {
-      return;
+      return null;
     }
 
     if (!entry.timestamp || !entry.message?.usage) {
-      return;
+      return null;
     }
 
     const ts = new Date(entry.timestamp).getTime();
-    if (isNaN(ts) || ts < start7d) {
-      return;
+    if (isNaN(ts)) {
+      return null;
     }
 
     const u = entry.message.usage;
-    const total =
+    const tokens =
       (u.input_tokens ?? 0) +
       (u.output_tokens ?? 0) +
       (u.cache_creation_input_tokens ?? 0) +
       (u.cache_read_input_tokens ?? 0);
 
-    if (total === 0) {
-      return;
+    if (tokens === 0) {
+      return null;
     }
 
-    addTokens(ts >= start5h ? total : 0, total);
-
-    // Hourly bucket (index 23 = most recent hour).
-    // Guard against future timestamps (clock skew): skip entries with ts > nowMs.
-    if (ts >= start24h && ts <= nowMs) {
-      const ageMs = nowMs - ts; // always >= 0 here
-      const rawIndex = 23 - Math.floor(ageMs / 3_600_000);
-      const hourIndex = Math.max(0, Math.min(23, rawIndex)); // clamp to [0, 23]
-      hourlyBuckets[hourIndex] += total;
-    }
-
-    const model = entry.message.model ?? "unknown";
-    breakdownMap.set(model, (breakdownMap.get(model) ?? 0) + total);
+    return { ts, tokens, model: entry.message.model ?? "unknown" };
   }
 }

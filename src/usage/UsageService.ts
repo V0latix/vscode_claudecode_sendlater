@@ -8,6 +8,7 @@
  */
 import * as vscode from "vscode";
 import { IUsageProvider, TokenUsage } from "./IUsageProvider";
+import { ClaudeLocalProvider } from "./ClaudeLocalProvider";
 
 export interface AggregatedUsage {
   providers: {
@@ -22,6 +23,10 @@ export interface AggregatedUsage {
   modelBreakdown?: import("./IUsageProvider").ModelBreakdown[];
   /** 24-hour hourly sparkline from the best provider (may be undefined). */
   hourlyLast24h?: number[];
+  /** Start of the current rate-limit window (from ClaudeLocalProvider). */
+  bestWindowStart?: Date;
+  /** When the current rate-limit window resets (from ClaudeLocalProvider). */
+  bestWindowEnd?: Date;
 }
 
 export class UsageService {
@@ -31,6 +36,8 @@ export class UsageService {
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   /** Tracks providers for which an invalid-key notification has already been shown this session. */
   private readonly _invalidKeyNotified = new Set<string>();
+  /** True while a refresh() call is in flight — prevents stacked calls from setWindowHint(). */
+  private _refreshing = false;
 
   readonly onDidChangeEmitter = new vscode.EventEmitter<AggregatedUsage>();
   readonly onDidChange = this.onDidChangeEmitter.event;
@@ -61,6 +68,28 @@ export class UsageService {
   /** Return cached data without fetching. */
   getCached(): AggregatedUsage | undefined {
     return this.cachedResult;
+  }
+
+  /**
+   * Inject a known window reset time from a parsed rate-limit message.
+   * Delegates to ClaudeLocalProvider and triggers an immediate refresh
+   * so the UI reflects the accurate window immediately.
+   */
+  setWindowHint(resetAt: Date): void {
+    const claudeProvider = this.providers.find(
+      (p) => p instanceof ClaudeLocalProvider,
+    ) as ClaudeLocalProvider | undefined;
+    claudeProvider?.setWindowHint(resetAt);
+    // Refresh asynchronously so the UI updates with the correct window.
+    // Guard against concurrent calls (e.g. rapid rate-limit messages).
+    if (!this._refreshing) {
+      this._refreshing = true;
+      this.refresh()
+        .catch(() => undefined)
+        .finally(() => {
+          this._refreshing = false;
+        });
+    }
   }
 
   /** Fetch from all providers and update cache. */
@@ -102,6 +131,8 @@ export class UsageService {
       lastRefreshed: new Date(),
       modelBreakdown: bestSource?.usage.breakdown,
       hourlyLast24h: bestSource?.usage.hourlyLast24h,
+      bestWindowStart: bestSource?.usage.currentWindowStart,
+      bestWindowEnd: bestSource?.usage.currentWindowEnd,
     };
 
     // Notify once per session when a key is invalid/expired

@@ -8,6 +8,7 @@ import {
   QueueItem,
   DeliveryLogEntry,
 } from "../../queue/QueueStore";
+import { detectWindowStart, FIVE_HOURS_MS } from "../../util/windowDetection";
 
 // ── Mock vscode.Memento ────────────────────────────────────────────────────
 class MockMemento {
@@ -249,6 +250,100 @@ suite("Retry exponential backoff calculation", () => {
     const maxRetries = 3;
     assert.ok(2 < maxRetries, "attempt 2 should still retry");
     assert.ok(!(3 < maxRetries), "attempt 3 is the last — no more retry");
+  });
+});
+
+// ── Window detection algorithm ────────────────────────────────────────────
+//
+// Tests the real detectWindowStart() exported from util/windowDetection.ts.
+
+suite("detectWindowStart — window detection", () => {
+  function e(ts: number): { ts: number } {
+    return { ts };
+  }
+
+  test("no entries → null", () => {
+    assert.strictEqual(detectWindowStart([], Date.now()), null);
+  });
+
+  test("single recent entry → window starts at that entry", () => {
+    const now = 14 * 3_600_000 * 1000;
+    const entry = e(now - 1 * 3_600_000); // 1h ago
+    assert.strictEqual(detectWindowStart([entry], now), entry.ts);
+  });
+
+  test("entries without gap → window starts at oldest entry", () => {
+    const now = new Date("2026-04-04T14:00:00Z").getTime();
+    const entries = [
+      e(new Date("2026-04-04T10:00:00Z").getTime()),
+      e(new Date("2026-04-04T11:00:00Z").getTime()),
+      e(new Date("2026-04-04T12:00:00Z").getTime()),
+    ];
+    assert.strictEqual(detectWindowStart(entries, now), entries[0].ts);
+  });
+
+  test("gap ≥ 5h → window resets at the entry after the gap", () => {
+    const now = new Date("2026-04-04T14:00:00Z").getTime();
+    const entries = [
+      e(new Date("2026-04-04T06:00:00Z").getTime()),
+      e(new Date("2026-04-04T07:00:00Z").getTime()),
+      e(new Date("2026-04-04T13:00:00Z").getTime()), // gap = 6h → new window
+      e(new Date("2026-04-04T13:30:00Z").getTime()),
+    ];
+    assert.strictEqual(
+      detectWindowStart(entries, now),
+      new Date("2026-04-04T13:00:00Z").getTime(),
+    );
+  });
+
+  test("exactly 5h gap → boundary treated as expired → null", () => {
+    const now = new Date("2026-04-04T18:00:00Z").getTime();
+    const t1 = new Date("2026-04-04T08:00:00Z").getTime();
+    const t2 = new Date("2026-04-04T13:00:00Z").getTime(); // gap = 5h exactly
+    // t2 + 5h = 18:00 ≤ now(18:00) → expired
+    assert.strictEqual(detectWindowStart([e(t1), e(t2)], now), null);
+  });
+
+  test("window expired (anchor + 5h ≤ now) → null", () => {
+    const now = new Date("2026-04-04T20:00:00Z").getTime();
+    const entries = [e(new Date("2026-04-04T10:00:00Z").getTime())];
+    assert.strictEqual(detectWindowStart(entries, now), null);
+  });
+
+  test("multiple resets: most recent window start is returned", () => {
+    const now = new Date("2026-04-04T22:00:00Z").getTime();
+    const entries = [
+      e(new Date("2026-04-04T06:00:00Z").getTime()),
+      e(new Date("2026-04-04T12:00:00Z").getTime()), // gap 6h
+      e(new Date("2026-04-04T19:00:00Z").getTime()), // gap 7h → window 3
+      e(new Date("2026-04-04T21:00:00Z").getTime()),
+    ];
+    assert.strictEqual(
+      detectWindowStart(entries, now),
+      new Date("2026-04-04T19:00:00Z").getTime(),
+    );
+  });
+
+  test("hint in future overrides gap detection", () => {
+    const now = new Date("2026-04-04T14:00:00Z").getTime();
+    const hintResetAt = new Date("2026-04-04T17:30:00Z").getTime();
+    // entries alone would give window start = 10:00
+    const entries = [e(new Date("2026-04-04T10:00:00Z").getTime())];
+    assert.strictEqual(
+      detectWindowStart(entries, now, hintResetAt),
+      hintResetAt - FIVE_HOURS_MS, // 12:30
+    );
+  });
+
+  test("expired hint is ignored, falls through to gap detection", () => {
+    const now = new Date("2026-04-04T20:00:00Z").getTime();
+    const expiredHint = new Date("2026-04-04T15:00:00Z").getTime(); // < now
+    const entries = [e(new Date("2026-04-04T18:00:00Z").getTime())]; // window active
+    // hint is expired → gap detection applies; entry at 18:00 + 5h = 23:00 > now → active
+    assert.strictEqual(
+      detectWindowStart(entries, now, expiredHint),
+      new Date("2026-04-04T18:00:00Z").getTime(),
+    );
   });
 });
 

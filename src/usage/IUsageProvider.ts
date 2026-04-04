@@ -22,6 +22,10 @@ export interface TokenUsage {
   dataDelay?: boolean;
   /** True if the API key is invalid or expired (HTTP 401/403) — triggers an actionable notification. */
   isInvalidKey?: boolean;
+  /** Start of the current rate-limit window (anchored, not rolling). Only set by ClaudeLocalProvider. */
+  currentWindowStart?: Date;
+  /** When the current rate-limit window resets (windowStart + 5h). Only set by ClaudeLocalProvider. */
+  currentWindowEnd?: Date;
   /**
    * Token counts per hour for the last 24 hours.
    * Array of 24 values, index 0 = oldest hour (23-24h ago), index 23 = current hour (0-1h ago).

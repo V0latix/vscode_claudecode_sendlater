@@ -285,6 +285,11 @@ export function activate(context: vscode.ExtensionContext): void {
       await store.add(item);
       queueWebviewProvider.refresh();
 
+      // Anchor the usage window to the known reset time for accurate token display
+      if (rateLimitInfo.resetAt) {
+        usageService.setWindowHint(rateLimitInfo.resetAt);
+      }
+
       const resetStr = formatDisplayTime(notBefore);
       log.appendLine(
         `[Extension] Rate-limited queue: ${item.id} notBefore=${item.notBefore}`,
