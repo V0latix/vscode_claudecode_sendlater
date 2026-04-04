@@ -2,10 +2,26 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { QueueStore, QueueItem } from "./QueueStore";
+import { QueueStore, QueueItem, DeliveryLogEntry } from "./QueueStore";
 import { isOverdue } from "../util/time";
 
 const PROCESS_INTERVAL_MS = 60_000; // 1 minute
+
+/**
+ * Thrown when delivery cannot proceed due to permanent/config issues.
+ * These errors keep the item in queue for the user to manually retry —
+ * they are NOT rescheduled with exponential backoff.
+ *
+ * Examples: configured terminal name not found, wrong terminal name.
+ * (Contrast with transient errors like momentary storage failures, which
+ * go through the normal retry path.)
+ */
+class NonRetryableDeliveryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NonRetryableDeliveryError";
+  }
+}
 
 export class QueueProcessor {
   private readonly store: QueueStore;
@@ -47,16 +63,54 @@ export class QueueProcessor {
       return 0;
     }
 
+    const cfg = vscode.workspace.getConfiguration("promptQueue");
+    const maxRetries: number = cfg.get("maxDeliveryRetries", 3);
+
     for (const item of due) {
       try {
+        // deliver() writes the success log entry before removing the item,
+        // so a failure in the log write leaves the item in queue for retry.
         await this.deliver(item);
       } catch (err) {
-        this.log.appendLine(
-          `[QueueProcessor] Error delivering ${item.id}: ${err}`,
-        );
-        vscode.window.showErrorMessage(
-          `PromptQueue: failed to deliver prompt ${item.id}: ${err}`,
-        );
+        if (err instanceof NonRetryableDeliveryError) {
+          // Config/permanent issue — keep item in queue, user must resolve manually.
+          this.log.appendLine(
+            `[QueueProcessor] Non-retryable delivery failure for ${item.id}: ${err.message}`,
+          );
+          vscode.window.showErrorMessage(
+            `PromptQueue: ${err.message}. Prompt kept in queue — resolve the issue and retry manually.`,
+          );
+        } else {
+          // Transient error — apply exponential backoff up to maxRetries.
+          const attempts = (item.deliveryAttempts ?? 0) + 1;
+          if (attempts < maxRetries) {
+            const delayMs = 60_000 * Math.pow(2, attempts - 1);
+            const newNotBefore = new Date(Date.now() + delayMs).toISOString();
+            await this.store.update(item.id, {
+              deliveryAttempts: attempts,
+              notBefore: newNotBefore,
+            });
+            this.log.appendLine(
+              `[QueueProcessor] Attempt ${attempts}/${maxRetries} failed for ${item.id}, ` +
+                `retrying in ${delayMs / 1000}s: ${err}`,
+            );
+          } else {
+            // Max retries exhausted — log failure and notify user.
+            this.log.appendLine(
+              `[QueueProcessor] Max retries (${maxRetries}) reached for ${item.id}: ${err}`,
+            );
+            await this.store.addDeliveryLogEntry({
+              itemId: item.id,
+              timestamp: new Date().toISOString(),
+              status: "failed",
+              error: String(err),
+              promptPreview: item.promptText.slice(0, 80),
+            });
+            vscode.window.showErrorMessage(
+              `PromptQueue: failed to deliver prompt ${item.id} after ${maxRetries} attempts: ${err}`,
+            );
+          }
+        }
       }
     }
 
@@ -76,6 +130,13 @@ export class QueueProcessor {
       this.log.appendLine(
         `[QueueProcessor] Error force-delivering ${id}: ${err}`,
       );
+      await this.store.addDeliveryLogEntry({
+        itemId: item.id,
+        timestamp: new Date().toISOString(),
+        status: "failed",
+        error: String(err),
+        promptPreview: item.promptText.slice(0, 80),
+      });
       vscode.window.showErrorMessage(
         `PromptQueue: failed to deliver ${id}: ${err}`,
       );
@@ -87,37 +148,43 @@ export class QueueProcessor {
     const cfg = vscode.workspace.getConfiguration("promptQueue");
     const configuredName: string = cfg.get("targetTerminalName", "");
 
-    // Strict enforcement: if a target terminal is configured but not found,
-    // abort and keep the item queued rather than falling through to the wrong shell.
+    // When a target terminal is explicitly configured but not found, this is a
+    // non-retryable error — the item stays in queue for the user to fix manually
+    // (open the terminal or clear promptQueue.targetTerminalName).
     if (configuredName) {
       const target = vscode.window.terminals.find(
         (t) => t.name === configuredName,
       );
       if (!target) {
-        this.log.appendLine(
-          `[QueueProcessor] Abort delivery ${item.id}: configured terminal "${configuredName}" not found`,
+        throw new NonRetryableDeliveryError(
+          `Terminal "${configuredName}" not found — open it or clear promptQueue.targetTerminalName`,
         );
-        vscode.window.showErrorMessage(
-          `PromptQueue: terminal "${configuredName}" not found — prompt kept in queue. ` +
-            `Open that terminal or clear promptQueue.targetTerminalName to use auto-detection.`,
-        );
-        return; // item stays in queue
       }
     }
 
     const existing = this.findClaudeTerminal(item.targetTerminalName);
 
     if (existing) {
-      // Send directly to the existing Claude Code session.
-      // Bracketed paste mode (\x1b[200~ ... \x1b[201~) lets us inject multi-line text
-      // as a single unit — newlines won't trigger premature submission.
       this.log.appendLine(
         `[QueueProcessor] Sending to existing terminal "${existing.name}"`,
       );
+
+      // Best-effort check: if the terminal process has already exited before we
+      // even send, warn immediately (checked BEFORE sendText for reliability —
+      // exitStatus is set synchronously when the process exits, so this catches
+      // zombie terminals that VS Code still lists but whose process is gone).
+      if (existing.exitStatus !== undefined) {
+        this.log.appendLine(
+          `[QueueProcessor] Warning: terminal "${existing.name}" process has already exited ` +
+            `(code=${existing.exitStatus.code})`,
+        );
+        vscode.window.showWarningMessage(
+          `PromptQueue: terminal "${existing.name}" process has already exited — prompt may not be received.`,
+        );
+      }
+
       existing.show(true);
       // Strip ESC chars to avoid interfering with Claude Code CLI's TUI keybindings.
-      // \x1b[200~…\x1b[201~ (bracketed paste) starts with ESC (\x1b) which Claude Code
-      // CLI interprets as the Escape key — closing the current conversation context.
       const safe = item.promptText.replace(/\x1b/g, "");
       existing.sendText(safe, false);
       existing.sendText("\r", false); // Press Enter to submit
@@ -135,7 +202,15 @@ export class QueueProcessor {
       terminal.sendText(`claude "$(cat '${tmpFile}')" ; rm -f '${tmpFile}'`);
     }
 
-    // Remove from queue (not just mark processed).
+    // Write success log entry BEFORE removing from queue:
+    // if this write fails, the item stays in queue and can be retried.
+    await this.store.addDeliveryLogEntry({
+      itemId: item.id,
+      timestamp: new Date().toISOString(),
+      status: "delivered",
+      promptPreview: item.promptText.slice(0, 80),
+    });
+
     await this.store.remove(item.id);
 
     this.log.appendLine(`[QueueProcessor] Delivered ${item.id}`);
@@ -187,7 +262,6 @@ export class QueueProcessor {
       return undefined;
     }
 
-    // Try to match the stored workspace folder path
     if (item.workspaceFolder) {
       const match = folders.find((f) => f.uri.fsPath === item.workspaceFolder);
       if (match) {
@@ -195,7 +269,6 @@ export class QueueProcessor {
       }
     }
 
-    // Fallback to first available folder
     return folders[0];
   }
 }

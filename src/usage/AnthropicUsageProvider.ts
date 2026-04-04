@@ -18,14 +18,23 @@
  *   - Admin API key (distinct from regular claude API keys).
  *   - Stored in SecretStorage as "anthropic.adminApiKey".
  */
-import * as vscode from 'vscode';
-import * as https from 'https';
-import { IUsageProvider, TokenUsage, ProviderStatus, ModelBreakdown } from './IUsageProvider';
-import { getWindowStart5h, getWindowStart7d, formatDateParam } from '../util/time';
+import * as vscode from "vscode";
+import * as https from "https";
+import {
+  IUsageProvider,
+  TokenUsage,
+  ProviderStatus,
+  ModelBreakdown,
+} from "./IUsageProvider";
+import {
+  getWindowStart5h,
+  getWindowStart7d,
+  formatDateParam,
+} from "../util/time";
 
-const SECRET_KEY = 'anthropic.adminApiKey';
-const ANTHROPIC_VERSION = '2023-06-01';
-const BASE_HOST = 'api.anthropic.com';
+const SECRET_KEY = "anthropic.adminApiKey";
+const ANTHROPIC_VERSION = "2023-06-01";
+const BASE_HOST = "api.anthropic.com";
 
 interface AnthropicUsageBucket {
   /** ISO 8601 timestamp — start of the bucket. */
@@ -47,8 +56,8 @@ interface AnthropicUsageResponse {
 }
 
 export class AnthropicUsageProvider implements IUsageProvider {
-  readonly name = 'Anthropic';
-  private status: ProviderStatus = 'unconfigured';
+  readonly name = "Anthropic";
+  private status: ProviderStatus = "unconfigured";
   private readonly secrets: vscode.SecretStorage;
   private readonly log: vscode.OutputChannel;
 
@@ -69,12 +78,12 @@ export class AnthropicUsageProvider implements IUsageProvider {
   async fetchUsage(): Promise<TokenUsage> {
     const apiKey = await this.secrets.get(SECRET_KEY);
     if (!apiKey) {
-      this.status = 'no-key';
+      this.status = "no-key";
       return this.noKeyResult();
     }
 
     const config = vscode.workspace.getConfiguration();
-    const orgId: string = config.get('anthropic.orgId', '');
+    const orgId: string = config.get("anthropic.orgId", "");
 
     const now = new Date();
     const start5h = getWindowStart5h(now);
@@ -84,9 +93,7 @@ export class AnthropicUsageProvider implements IUsageProvider {
     const startDate = formatDateParam(start7d);
     const endDate = formatDateParam(now);
 
-    const pathBase = orgId
-      ? `/v1/organizations/${orgId}/usage`
-      : `/v1/usage`; // Fallback path — may differ per org setup
+    const pathBase = orgId ? `/v1/organizations/${orgId}/usage` : `/v1/usage`; // Fallback path — may differ per org setup
 
     const queryParams = new URLSearchParams({
       start_date: startDate,
@@ -98,7 +105,7 @@ export class AnthropicUsageProvider implements IUsageProvider {
     try {
       const resp = await this.fetchJson<AnthropicUsageResponse>(
         apiKey,
-        `${pathBase}?${queryParams.toString()}`
+        `${pathBase}?${queryParams.toString()}`,
       );
       allBuckets = resp.data ?? [];
 
@@ -107,10 +114,10 @@ export class AnthropicUsageProvider implements IUsageProvider {
       let lastId = resp.last_id;
       let page = 0;
       while (hasMore && lastId && page < 3) {
-        queryParams.set('after_id', lastId);
+        queryParams.set("after_id", lastId);
         const next = await this.fetchJson<AnthropicUsageResponse>(
           apiKey,
-          `${pathBase}?${queryParams.toString()}`
+          `${pathBase}?${queryParams.toString()}`,
         );
         allBuckets.push(...(next.data ?? []));
         hasMore = next.has_more ?? false;
@@ -119,13 +126,16 @@ export class AnthropicUsageProvider implements IUsageProvider {
       }
     } catch (err) {
       this.log.appendLine(`[AnthropicUsageProvider] Error: ${err}`);
-      this.status = 'error';
+      this.status = "error";
+      const errStr = String(err);
+      const isInvalidKey = errStr.includes("401") || errStr.includes("403");
       return {
         tokensLast5h: 0,
         tokensLast7d: 0,
         lastUpdated: new Date(),
         error: `Anthropic API error: ${err}`,
         dataDelay: true,
+        isInvalidKey,
       };
     }
 
@@ -149,7 +159,7 @@ export class AnthropicUsageProvider implements IUsageProvider {
         tokens7d += bucketTokens;
         breakdownMap.set(
           bucket.model,
-          (breakdownMap.get(bucket.model) ?? 0) + bucketTokens
+          (breakdownMap.get(bucket.model) ?? 0) + bucketTokens,
         );
       }
       if (bucketMs >= start5hMs) {
@@ -161,7 +171,7 @@ export class AnthropicUsageProvider implements IUsageProvider {
       .map(([model, tokens]) => ({ model, tokens }))
       .sort((a, b) => b.tokens - a.tokens);
 
-    this.status = 'ok';
+    this.status = "ok";
     return {
       tokensLast5h: tokens5h,
       tokensLast7d: tokens7d,
@@ -176,31 +186,39 @@ export class AnthropicUsageProvider implements IUsageProvider {
       const options = {
         hostname: BASE_HOST,
         path: urlPath,
-        method: 'GET',
+        method: "GET",
         headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': ANTHROPIC_VERSION,
-          'Content-Type': 'application/json',
+          "x-api-key": apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+          "Content-Type": "application/json",
         },
       };
 
       const req = https.request(options, (res) => {
-        let body = '';
-        res.on('data', (chunk) => { body += chunk; });
-        res.on('end', () => {
+        let body = "";
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
           if (res.statusCode === 401) {
-            reject(new Error('HTTP 401: Invalid admin API key.'));
+            reject(new Error("HTTP 401: Invalid admin API key."));
             return;
           }
           if (res.statusCode === 403) {
-            reject(new Error('HTTP 403: Forbidden. Ensure you are using an admin API key.'));
+            reject(
+              new Error(
+                "HTTP 403: Forbidden. Ensure you are using an admin API key.",
+              ),
+            );
             return;
           }
           if (res.statusCode === 404) {
-            reject(new Error(
-              'HTTP 404: Usage endpoint not found. Check that your orgId is correct ' +
-              '(Settings: anthropic.orgId) or consult Anthropic admin API docs.'
-            ));
+            reject(
+              new Error(
+                "HTTP 404: Usage endpoint not found. Check that your orgId is correct " +
+                  "(Settings: anthropic.orgId) or consult Anthropic admin API docs.",
+              ),
+            );
             return;
           }
           if (res.statusCode !== 200) {
@@ -215,8 +233,8 @@ export class AnthropicUsageProvider implements IUsageProvider {
         });
       });
 
-      req.on('error', reject);
-      req.setTimeout(10_000, () => req.destroy(new Error('Request timeout')));
+      req.on("error", reject);
+      req.setTimeout(10_000, () => req.destroy(new Error("Request timeout")));
       req.end();
     });
   }
@@ -226,11 +244,15 @@ export class AnthropicUsageProvider implements IUsageProvider {
       tokensLast5h: 0,
       tokensLast7d: 0,
       lastUpdated: new Date(),
-      error: 'No Anthropic admin API key configured. Run "Usage: Set Anthropic Admin API Key" from the command palette.',
+      error:
+        'No Anthropic admin API key configured. Run "Usage: Set Anthropic Admin API Key" from the command palette.',
     };
   }
 
-  static async setKey(secrets: vscode.SecretStorage, key: string): Promise<void> {
+  static async setKey(
+    secrets: vscode.SecretStorage,
+    key: string,
+  ): Promise<void> {
     await secrets.store(SECRET_KEY, key);
   }
 

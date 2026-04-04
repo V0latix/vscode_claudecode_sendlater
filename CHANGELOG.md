@@ -1,11 +1,22 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.3] — 2026-04-04
 
 ### Added
 - **GitHub Actions CI** — `.github/workflows/ci.yml` : compile + test (headless via `xvfb-run`) sur chaque push/PR vers `main`.
 - **GitHub Actions publish** — `.github/workflows/publish.yml` : publication automatique sur VS Code Marketplace (`vsce publish`, secret `VSCE_PAT`) et Open VSX (`ovsx publish`, secret `OVSX_PAT`) à chaque tag `v*`.
 - **README badges** — CI status, Marketplace version, installs et rating.
+- **Retry de livraison exponentiel** — le `QueueProcessor` retente la livraison jusqu'à `promptQueue.maxDeliveryRetries` fois (défaut 3) avec backoff 60 s / 120 s / 240 s quand le terminal cible est introuvable. Erreur finale affichée uniquement après épuisement des tentatives.
+- **Log de livraison** — historique des 20 derniers items livrés (timestamp, statut, preview) persisté dans `globalState` et affiché dans la section "Delivery History" de la webview Queue.
+- **Confirmation de réception (best-effort)** — après `terminal.sendText()`, vérification de `terminal.exitStatus` ; avertissement si le processus terminal est déjà sorti.
+- **Alerte clé API invalide** — quand un provider retourne HTTP 401/403, une notification VS Code actionnable propose directement de mettre à jour la clé (affiché une seule fois par session).
+- **Validation des IDs de configuration** — `openai.orgId` et `openai.projectId` sont validés par pattern JSON Schema dans les Settings (`org-…` / `proj-…`), avec message d'erreur inline.
+
+### Removed
+- **Fichiers legacy supprimés** — `src/ui/QueueViewProvider.ts` et `src/ui/UsageViewProvider.ts` (tree-views remplacées par les webviews depuis v0.2.0).
+
+### Tests
+- 30 nouveaux tests unitaires (`src/test/suite/p2features.test.ts`) : validation des patterns org/project ID, delivery log (cap 20, newest-first, statuts), `deliveryAttempts`, calcul du backoff exponentiel, détection de clé invalide (401/403).
 
 ## [0.3.2] — 2026-04-03
 

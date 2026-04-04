@@ -29,6 +29,8 @@ export class UsageService {
   private readonly log: vscode.OutputChannel;
   private cachedResult: AggregatedUsage | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
+  /** Tracks providers for which an invalid-key notification has already been shown this session. */
+  private readonly _invalidKeyNotified = new Set<string>();
 
   readonly onDidChangeEmitter = new vscode.EventEmitter<AggregatedUsage>();
   readonly onDidChange = this.onDidChangeEmitter.event;
@@ -101,6 +103,28 @@ export class UsageService {
       modelBreakdown: bestSource?.usage.breakdown,
       hourlyLast24h: bestSource?.usage.hourlyLast24h,
     };
+
+    // Notify once per session when a key is invalid/expired
+    for (const p of providers) {
+      if (p.usage.isInvalidKey && !this._invalidKeyNotified.has(p.name)) {
+        this._invalidKeyNotified.add(p.name);
+        const updateCmd =
+          p.name === "OpenAI" ? "usage.setOpenAIKey" : "usage.setAnthropicKey";
+        vscode.window
+          .showWarningMessage(
+            `${p.name}: API key is invalid or expired — usage tracking paused.`,
+            `Update ${p.name} key`,
+          )
+          .then((action) => {
+            if (action) {
+              vscode.commands.executeCommand(updateCmd);
+            }
+          });
+      } else if (!p.usage.isInvalidKey) {
+        // Key is no longer flagged as invalid — re-arm notification for future 401/403
+        this._invalidKeyNotified.delete(p.name);
+      }
+    }
 
     this.cachedResult = result;
     this.onDidChangeEmitter.fire(result);

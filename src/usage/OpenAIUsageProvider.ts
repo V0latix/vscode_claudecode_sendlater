@@ -14,13 +14,18 @@
  *   - Only the "admin" key (sk-org-...) can call this endpoint — a standard
  *     project key (sk-proj-...) will return 403.
  */
-import * as vscode from 'vscode';
-import * as https from 'https';
-import { IUsageProvider, TokenUsage, ProviderStatus, ModelBreakdown } from './IUsageProvider';
-import { getWindowStart5h, getWindowStart7d, datesInRange } from '../util/time';
+import * as vscode from "vscode";
+import * as https from "https";
+import {
+  IUsageProvider,
+  TokenUsage,
+  ProviderStatus,
+  ModelBreakdown,
+} from "./IUsageProvider";
+import { getWindowStart5h, getWindowStart7d, datesInRange } from "../util/time";
 
-const SECRET_KEY = 'openai.adminApiKey';
-const BASE_URL = 'https://api.openai.com';
+const SECRET_KEY = "openai.adminApiKey";
+const BASE_URL = "https://api.openai.com";
 
 interface OpenAIUsageEntry {
   aggregation_timestamp: number; // Unix seconds — start of the hour bucket
@@ -37,8 +42,8 @@ interface OpenAIUsageResponse {
 }
 
 export class OpenAIUsageProvider implements IUsageProvider {
-  readonly name = 'OpenAI';
-  private status: ProviderStatus = 'unconfigured';
+  readonly name = "OpenAI";
+  private status: ProviderStatus = "unconfigured";
   private readonly secrets: vscode.SecretStorage;
   private readonly log: vscode.OutputChannel;
 
@@ -59,13 +64,13 @@ export class OpenAIUsageProvider implements IUsageProvider {
   async fetchUsage(): Promise<TokenUsage> {
     const apiKey = await this.secrets.get(SECRET_KEY);
     if (!apiKey) {
-      this.status = 'no-key';
+      this.status = "no-key";
       return this.noKeyResult();
     }
 
     const config = vscode.workspace.getConfiguration();
-    const orgId: string = config.get('openai.orgId', '');
-    const projectId: string = config.get('openai.projectId', '');
+    const orgId: string = config.get("openai.orgId", "");
+    const projectId: string = config.get("openai.projectId", "");
 
     const now = new Date();
     const start5h = getWindowStart5h(now);
@@ -80,16 +85,23 @@ export class OpenAIUsageProvider implements IUsageProvider {
       try {
         const resp = await this.fetchDate(apiKey, date, orgId, projectId);
         allEntries.push(...resp.data);
-        if (resp.ft_data) { allEntries.push(...resp.ft_data); }
+        if (resp.ft_data) {
+          allEntries.push(...resp.ft_data);
+        }
       } catch (err) {
-        this.log.appendLine(`[OpenAIUsageProvider] Error fetching date ${date}: ${err}`);
-        this.status = 'error';
+        this.log.appendLine(
+          `[OpenAIUsageProvider] Error fetching date ${date}: ${err}`,
+        );
+        this.status = "error";
+        const errStr = String(err);
+        const isInvalidKey = errStr.includes("401") || errStr.includes("403");
         return {
           tokensLast5h: 0,
           tokensLast7d: 0,
           lastUpdated: new Date(),
           error: `API error: ${err}`,
           dataDelay: true,
+          isInvalidKey,
         };
       }
     }
@@ -104,7 +116,9 @@ export class OpenAIUsageProvider implements IUsageProvider {
 
     for (const entry of allEntries) {
       const entryMs = entry.aggregation_timestamp * 1000;
-      const entryTokens = (entry.n_context_tokens_total ?? 0) + (entry.n_generated_tokens_total ?? 0);
+      const entryTokens =
+        (entry.n_context_tokens_total ?? 0) +
+        (entry.n_generated_tokens_total ?? 0);
 
       if (entryMs >= start7dMs) {
         tokens7d += entryTokens;
@@ -114,7 +128,7 @@ export class OpenAIUsageProvider implements IUsageProvider {
       }
 
       // Breakdown by model
-      const model = entry.snapshot_id ?? 'unknown';
+      const model = entry.snapshot_id ?? "unknown";
       if (entryMs >= start7dMs) {
         breakdownMap.set(model, (breakdownMap.get(model) ?? 0) + entryTokens);
       }
@@ -124,7 +138,7 @@ export class OpenAIUsageProvider implements IUsageProvider {
       .map(([model, tokens]) => ({ model, tokens }))
       .sort((a, b) => b.tokens - a.tokens);
 
-    this.status = 'ok';
+    this.status = "ok";
     return {
       tokensLast5h: tokens5h,
       tokensLast7d: tokens7d,
@@ -142,25 +156,35 @@ export class OpenAIUsageProvider implements IUsageProvider {
   ): Promise<OpenAIUsageResponse> {
     return new Promise((resolve, reject) => {
       const headers: Record<string, string> = {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       };
-      if (orgId) { headers['Openai-Organization'] = orgId; }
-      if (projectId) { headers['Openai-Project'] = projectId; }
+      if (orgId) {
+        headers["Openai-Organization"] = orgId;
+      }
+      if (projectId) {
+        headers["Openai-Project"] = projectId;
+      }
 
       const options = {
-        hostname: 'api.openai.com',
+        hostname: "api.openai.com",
         path: `/v1/usage?date=${date}`,
-        method: 'GET',
+        method: "GET",
         headers,
       };
 
       const req = https.request(options, (res) => {
-        let body = '';
-        res.on('data', (chunk) => { body += chunk; });
-        res.on('end', () => {
+        let body = "";
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
           if (res.statusCode === 401 || res.statusCode === 403) {
-            reject(new Error(`HTTP ${res.statusCode}: Invalid or insufficient API key. Use an organization admin key.`));
+            reject(
+              new Error(
+                `HTTP ${res.statusCode}: Invalid or insufficient API key. Use an organization admin key.`,
+              ),
+            );
             return;
           }
           if (res.statusCode !== 200) {
@@ -175,9 +199,9 @@ export class OpenAIUsageProvider implements IUsageProvider {
         });
       });
 
-      req.on('error', reject);
+      req.on("error", reject);
       req.setTimeout(10_000, () => {
-        req.destroy(new Error('Request timeout'));
+        req.destroy(new Error("Request timeout"));
       });
       req.end();
     });
@@ -188,12 +212,16 @@ export class OpenAIUsageProvider implements IUsageProvider {
       tokensLast5h: 0,
       tokensLast7d: 0,
       lastUpdated: new Date(),
-      error: 'No OpenAI API key configured. Run "Usage: Set OpenAI API Key" from the command palette.',
+      error:
+        'No OpenAI API key configured. Run "Usage: Set OpenAI API Key" from the command palette.',
     };
   }
 
   /** Store the API key in SecretStorage. */
-  static async setKey(secrets: vscode.SecretStorage, key: string): Promise<void> {
+  static async setKey(
+    secrets: vscode.SecretStorage,
+    key: string,
+  ): Promise<void> {
     await secrets.store(SECRET_KEY, key);
   }
 

@@ -15,9 +15,25 @@ export interface QueueItem {
   processed: boolean;
   /** Name of the terminal that was active when the item was queued (delivery hint). */
   targetTerminalName?: string;
+  /** Number of failed delivery attempts so far (used for retry logic). */
+  deliveryAttempts?: number;
+}
+
+export interface DeliveryLogEntry {
+  /** ID of the queue item that was delivered (or attempted). */
+  itemId: string;
+  /** ISO 8601 timestamp of the delivery attempt. */
+  timestamp: string;
+  status: "delivered" | "failed";
+  /** Error message if status is 'failed'. */
+  error?: string;
+  /** First 80 characters of the prompt text. */
+  promptPreview: string;
 }
 
 const STORAGE_KEY = "promptQueue.items";
+const DELIVERY_LOG_KEY = "promptQueue.deliveryLog";
+const DELIVERY_LOG_MAX = 20;
 
 /**
  * Persistent queue store backed by vscode.Memento (globalState).
@@ -67,10 +83,12 @@ export class QueueStore {
     await this.state.update(STORAGE_KEY, items);
   }
 
-  /** Update mutable fields of an existing item (promptText, notBefore). */
+  /** Update mutable fields of an existing item. */
   async update(
     id: string,
-    changes: Partial<Pick<QueueItem, "promptText" | "notBefore">>,
+    changes: Partial<
+      Pick<QueueItem, "promptText" | "notBefore" | "deliveryAttempts">
+    >,
   ): Promise<void> {
     const items = this.getAll().map((i) =>
       i.id === id ? { ...i, ...changes } : i,
@@ -81,5 +99,27 @@ export class QueueStore {
   /** Clear everything (debug / test). */
   async clear(): Promise<void> {
     await this.state.update(STORAGE_KEY, []);
+  }
+
+  // ── Delivery log ─────────────────────────────────────────────────────────
+
+  /** Return delivery log entries (newest first, max 20). */
+  getDeliveryLog(): DeliveryLogEntry[] {
+    return this.state.get<DeliveryLogEntry[]>(DELIVERY_LOG_KEY, []);
+  }
+
+  /** Prepend a new delivery log entry, keeping at most DELIVERY_LOG_MAX entries. */
+  async addDeliveryLogEntry(entry: DeliveryLogEntry): Promise<void> {
+    const log = this.getDeliveryLog();
+    log.unshift(entry);
+    if (log.length > DELIVERY_LOG_MAX) {
+      log.length = DELIVERY_LOG_MAX;
+    }
+    await this.state.update(DELIVERY_LOG_KEY, log);
+  }
+
+  /** Clear the delivery log (debug / test). */
+  async clearDeliveryLog(): Promise<void> {
+    await this.state.update(DELIVERY_LOG_KEY, []);
   }
 }

@@ -2,7 +2,7 @@
   "name": "prompt-queue-usage-monitor",
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "v0latix",
   "license": "MIT",
   "repository": {
@@ -121,17 +121,28 @@
         "openai.orgId": {
           "type": "string",
           "default": "",
+          "pattern": "^(org-[a-zA-Z0-9_-]+)?$",
+          "patternErrorMessage": "Must start with 'org-' (e.g. org-abc123) or be empty.",
           "description": "OpenAI Organization ID (optional, sent as Openai-Organization header)."
         },
         "openai.projectId": {
           "type": "string",
           "default": "",
+          "pattern": "^(proj-[a-zA-Z0-9_-]+)?$",
+          "patternErrorMessage": "Must start with 'proj-' (e.g. proj-abc123) or be empty.",
           "description": "OpenAI Project ID (optional, sent as Openai-Project header)."
         },
         "anthropic.orgId": {
           "type": "string",
           "default": "",
           "description": "Anthropic Organization/Workspace ID (optional, used in API path)."
+        },
+        "promptQueue.maxDeliveryRetries": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Maximum delivery retry attempts when a terminal is not found. Each retry uses exponential backoff (60s, 120s, 240s…). Set 0 to disable retries."
         },
         "usage.refreshIntervalMinutes": {
           "type": "number",

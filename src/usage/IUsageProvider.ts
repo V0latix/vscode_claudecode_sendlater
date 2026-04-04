@@ -20,6 +20,8 @@ export interface TokenUsage {
   error?: string;
   /** True if the API has a known data lag (e.g. a few minutes behind). */
   dataDelay?: boolean;
+  /** True if the API key is invalid or expired (HTTP 401/403) — triggers an actionable notification. */
+  isInvalidKey?: boolean;
   /**
    * Token counts per hour for the last 24 hours.
    * Array of 24 values, index 0 = oldest hour (23-24h ago), index 23 = current hour (0-1h ago).

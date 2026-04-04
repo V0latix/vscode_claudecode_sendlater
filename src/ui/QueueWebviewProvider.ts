@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as nodeCrypto from "crypto";
-import { QueueStore, QueueItem } from "../queue/QueueStore";
+import { QueueStore, QueueItem, DeliveryLogEntry } from "../queue/QueueStore";
 import { QueueProcessor } from "../queue/QueueProcessor";
 import { generateShortId } from "../util/crypto";
 import {
@@ -28,7 +28,11 @@ type InMsg =
 type OutMsg =
   | { type: "rateLimitDetected"; info: RateLimitInfo | null }
   | { type: "textLoaded"; text: string }
-  | { type: "queueUpdated"; items: QueueItem[] }
+  | {
+      type: "queueUpdated";
+      items: QueueItem[];
+      deliveryLog: DeliveryLogEntry[];
+    }
   | { type: "queued" }
   | { type: "toast"; level: "info" | "warn" | "error"; message: string };
 
@@ -93,7 +97,11 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
 
   private sendQueue(): void {
     this.updateBadge();
-    this.post({ type: "queueUpdated", items: this.store.getAll() });
+    this.post({
+      type: "queueUpdated",
+      items: this.store.getAll(),
+      deliveryLog: this.store.getDeliveryLog(),
+    });
   }
 
   private async handle(msg: InMsg): Promise<void> {
@@ -196,8 +204,8 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
       }
 
       case "forceSend":
+        // forceDeliver fires onDidChange → sendQueue() via listener; no manual refresh needed.
         await this.processor.forceDeliver(msg.id);
-        this.sendQueue();
         break;
 
       case "snoozeItem": {
@@ -208,8 +216,10 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         const base = new Date(
           Math.max(Date.now(), new Date(item.notBefore).getTime()),
         );
+        // Reset deliveryAttempts: user is rescheduling, so start fresh.
         await this.store.update(msg.id, {
           notBefore: addMinutes(base, msg.minutes).toISOString(),
+          deliveryAttempts: 0,
         });
         this.sendQueue();
         break;
@@ -224,9 +234,11 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
           });
           return;
         }
+        // Reset deliveryAttempts: user is manually rescheduling, so start fresh.
         await this.store.update(msg.id, {
           promptText: msg.promptText,
           notBefore: msg.notBefore,
+          deliveryAttempts: 0,
         });
         this.sendQueue();
         break;
@@ -623,6 +635,29 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     font-style: italic;
   }
 
+  /* ── Delivery history ─────────────────────────────────────────────────── */
+  .history-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.1));
+    font-size: 0.82em;
+  }
+  .history-item:last-child { border-bottom: none; }
+  .history-icon { flex-shrink: 0; width: 14px; text-align: center; }
+  .history-item.delivered .history-icon { color: var(--vscode-testing-iconPassed, #89d185); }
+  .history-item.failed .history-icon { color: var(--vscode-errorForeground, #f48771); }
+  .history-body { flex: 1; min-width: 0; }
+  .history-time { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+  .history-preview {
+    color: var(--vscode-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .history-item.failed .history-preview { color: var(--vscode-errorForeground, #f48771); }
+
   /* ── Toast ────────────────────────────────────────────────────────────── */
   #toast {
     position: sticky;
@@ -706,6 +741,12 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   <div id="queueList"><div class="empty-state">No prompts queued yet.</div></div>
 </div>
 
+<!-- ── Delivery history ────────────────────────────────────────────────────── -->
+<div class="section" id="historySection" style="display:none">
+  <div class="section-title">📋 Delivery History</div>
+  <div id="historyList"></div>
+</div>
+
 <div id="toast"></div>
 
 <script nonce="${nonce}">
@@ -740,8 +781,10 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   const queueBtn      = document.getElementById('queueBtn');
   const pendingBadge  = document.getElementById('pendingBadge');
   const queueList     = document.getElementById('queueList');
-  const processNowBtn = document.getElementById('processNowBtn');
-  const toast         = document.getElementById('toast');
+  const processNowBtn   = document.getElementById('processNowBtn');
+  const toast           = document.getElementById('toast');
+  const historySection  = document.getElementById('historySection');
+  const historyList     = document.getElementById('historyList');
 
   // ── Restore persisted values ─────────────────────────────────────────────
   delayInput.value  = delayMinutes;
@@ -839,6 +882,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
       case 'queueUpdated':
         lastItems = msg.items;
         renderQueueItems(lastItems);
+        renderDeliveryLog(msg.deliveryLog || []);
         break;
 
       case 'queued':
@@ -1092,6 +1136,30 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     toast.style.display = 'block';
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { toast.style.display = 'none'; }, 3500);
+  }
+
+  // ── Delivery history render ───────────────────────────────────────────────
+  function renderDeliveryLog(log) {
+    if (!log.length) {
+      historySection.style.display = 'none';
+      return;
+    }
+    historySection.style.display = '';
+    historyList.innerHTML = log.map(entry => {
+      const icon = entry.status === 'delivered' ? '✓' : '✕';
+      const cls  = entry.status === 'delivered' ? 'delivered' : 'failed';
+      const time = formatTime(new Date(entry.timestamp));
+      const detail = entry.error
+        ? esc(entry.promptPreview) + ' — ' + esc(entry.error.slice(0, 60))
+        : esc(entry.promptPreview);
+      return \`<div class="history-item \${cls}">
+  <span class="history-icon">\${icon}</span>
+  <div class="history-body">
+    <div class="history-time">\${time}</div>
+    <div class="history-preview">\${detail}</div>
+  </div>
+</div>\`;
+    }).join('');
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

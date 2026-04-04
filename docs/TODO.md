@@ -41,15 +41,15 @@
 
 ### Nettoyage technique
 
-- [ ] **Supprimer les fichiers legacy inutilisés** — `src/ui/QueueViewProvider.ts` et `src/ui/UsageViewProvider.ts` sont des tree-views remplacées par les webviews. Ils alourdissent le bundle (~50 lignes de code mort).
-- [ ] **Valider les IDs de configuration** — Ajouter une validation légère de format pour `openai.orgId` (`org-…`), `openai.projectId` (`proj-…`) et `anthropic.orgId` au moment de la saisie, avec message d'erreur clair.
-- [ ] **Gestion de l'expiration de clé API** — Actuellement, une clé révoquée donne une erreur silencieuse. Afficher un message actionnable ("Votre clé OpenAI est invalide — mettre à jour ?") avec bouton direct.
+- [x] **Supprimer les fichiers legacy inutilisés** — `src/ui/QueueViewProvider.ts` et `src/ui/UsageViewProvider.ts` supprimés.
+- [x] **Valider les IDs de configuration** — Pattern JSON schema (`org-…`, `proj-…`) dans `package.json` ; erreur inline dans l'UI Settings.
+- [x] **Gestion de l'expiration de clé API** — `isInvalidKey` propagé depuis les providers (HTTP 401/403) ; `UsageService` affiche une notification actionnable avec bouton "Update key" (une fois par session).
 
 ### Livraison de prompt
 
-- [ ] **Timeout de livraison configurable** — Le processor tente la livraison puis abandonne silencieusement. Ajouter un retry avec délai exponentiel (max 3 tentatives sur 3 min).
-- [ ] **Log de livraison** — Garder un historique des 20 derniers items livrés (timestamp + statut) accessible depuis la webview pour diagnostiquer des problèmes.
-- [ ] **Confirmation de réception** — Après `terminal.sendText()`, vérifier (best-effort via parseOutput si possible) que le CLI a bien reçu la commande, sinon signaler un avertissement.
+- [x] **Retry avec délai exponentiel** — `QueueProcessor` retente jusqu'à `promptQueue.maxDeliveryRetries` fois (défaut 3) avec backoff 60s/120s/240s. Erreur finale affichée après épuisement des tentatives.
+- [x] **Log de livraison** — `DeliveryLogEntry[]` persisté dans `globalState` (max 20 entrées, newest-first). Section "Delivery History" dans la webview Queue.
+- [x] **Confirmation de réception (best-effort)** — Après `terminal.sendText()`, vérification de `terminal.exitStatus` ; warning si le processus est déjà sorti.
 
 ---
 
