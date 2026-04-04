@@ -11,72 +11,90 @@
 - [x] **Corriger les dates placeholder dans CHANGELOG.md** — `0.2.0` → 2026-03-27, `0.1.1` → 2026-02-24.
 - [x] **README Marketplace** — README entièrement reécrit : installation, usage détaillé, tableaux commandes/config, fonctionnement interne, sécurité.
 - [ ] **Screenshots / GIF** — Captures d'écran annotées des 3 panels + GIF du flow rate-limit (à faire manuellement).
+- [ ] **Créer les secrets GitHub** — Les workflows CI/publish sont prêts. Il reste à créer dans `GitHub → Settings → Secrets → Actions` :
+  - `VSCE_PAT` : Personal Access Token Azure DevOps (scope **Marketplace > Manage**, org = "All accessible organizations").
+  - `OVSX_PAT` : Token Open VSX depuis open-vsx.org.
 
 ---
 
-## P1 — Fonctionnalités à fort impact
+## P1–P3 — Toutes terminées
 
-### Queue
-
-- [x] **Édition in-place** — Bouton ✏ sur chaque item ; ouvre un formulaire inline avec textarea + datetime-local. Sauvegarde via `editItem` → `QueueStore.update()`.
-- [x] **Snooze rapide** — Boutons +15m et +1h sur chaque item. Reporte depuis `max(now, notBefore)` via `snoozeItem` → `QueueStore.update()`.
-- [x] **Aperçu du prompt** — Tooltip ou expand au survol d'un item pour voir les 200 premiers caractères sans ouvrir le fichier.
-- [x] **Badge de notification** — Afficher un badge sur l'icône de l'activity bar lors de la livraison d'un item (via `viewBadge` API, dispo depuis VS Code 1.83).
-- [x] **Support multi-terminal nommé** — Permettre à l'utilisateur de configurer le nom exact du terminal cible (`promptQueue.targetTerminalName`) plutôt que de dépendre de la détection heuristique.
-
-### Usage Monitor
-
-- [x] **Alertes de quota** — Déclencher une notification VS Code (`vscode.window.showWarningMessage`) quand l'utilisation dépasse un seuil configurable (ex. 80 % sur 5h).
-- [x] **Sparkline historique** — Graphique en barres minimaliste des dernières 24h dans le panel usage (données déjà disponibles dans `~/.claude/projects/*.jsonl`).
-- [x] **Breakdown par modèle** — Le `ClaudeLocalProvider` lit déjà `model` dans les JSONL : afficher la répartition claude-3-5-sonnet / claude-opus / haiku dans le panel.
-
-### Claude Commands Browser
-
-- [x] **Prévisualisation inline** — Afficher le contenu complet d'une commande dans un split editor au clic plutôt que d'ouvrir le fichier brut (meilleure lisibilité du markdown).
-- [x] **Créer une commande depuis le browser** — Bouton "+ New command" qui génère un fichier `.claude/commands/nom.md` avec un template YAML frontmatter pré-rempli.
+Voir CHANGELOG v0.3.3–v0.3.5 pour le détail. Résumé des grandes features livrées :
+- Queue : édition in-place, snooze, aperçu, badge, terminal nommé, retry exponentiel, log de livraison, export/import JSON, pause persistée.
+- Usage Monitor : sparkline 24h, breakdown par modèle, alertes quota, détection fenêtre 5h par gap JSONL, hint rate-limit.
+- Claude Commands Browser : preview inline, création de commande, scan agents/skills/MCP.
+- CI/CD : GitHub Actions compile+test+publish.
 
 ---
 
-## P2 — Qualité & robustesse
+## P4 — Personnalisation Claude Code
 
-### Nettoyage technique
+> **Contexte :** Claude Code stocke sa configuration dans `~/.claude/settings.json` (permissions, env vars, theme, co-author flag) et ses agents dans `~/.claude/agents/*.md` (frontmatter YAML : name, description, tools, model, color, permissionMode). Une UI VS Code pour gérer tout ça éviterait d'éditer ces fichiers à la main.
 
-- [x] **Supprimer les fichiers legacy inutilisés** — `src/ui/QueueViewProvider.ts` et `src/ui/UsageViewProvider.ts` supprimés.
-- [x] **Valider les IDs de configuration** — Pattern JSON schema (`org-…`, `proj-…`) dans `package.json` ; erreur inline dans l'UI Settings.
-- [x] **Gestion de l'expiration de clé API** — `isInvalidKey` propagé depuis les providers (HTTP 401/403) ; `UsageService` affiche une notification actionnable avec bouton "Update key" (une fois par session).
+### Éditeur de settings Claude Code
 
-### Livraison de prompt
+- [ ] **Settings Editor UI** — Panel webview pour éditer `~/.claude/settings.json` sans ouvrir le fichier JSON brut :
+  - Toggle `includeCoAuthoredBy` (co-author dans les commits git).
+  - `env` object : ajouter/supprimer des variables d'environnement globales (ex. `ANTHROPIC_MODEL`, `MAX_TOKENS`).
+  - `permissions.allow` / `permissions.deny` : liste éditable des règles d'accès aux outils (ex. `Bash(git log *)`, `Read`, `Write`).
+  - Sélecteur de thème (`light` / `dark` / `system`) si le champ est présent.
+  - Bouton "Ouvrir le fichier brut" pour les cas avancés.
 
-- [x] **Retry avec délai exponentiel** — `QueueProcessor` retente jusqu'à `promptQueue.maxDeliveryRetries` fois (défaut 3) avec backoff 60s/120s/240s. Erreur finale affichée après épuisement des tentatives.
-- [x] **Log de livraison** — `DeliveryLogEntry[]` persisté dans `globalState` (max 20 entrées, newest-first). Section "Delivery History" dans la webview Queue.
-- [x] **Confirmation de réception (best-effort)** — Après `terminal.sendText()`, vérification de `terminal.exitStatus` ; warning si le processus est déjà sorti.
+### Agents Browser & Editor
 
----
+- [ ] **Agent Browser étendu** — La vue Claude Commands scanne déjà `~/.claude/agents/*.md`. Amélioration : afficher les métadonnées complètes (model, tools, color, permissionMode) et trier par scope (global vs workspace).
+- [ ] **Créer / éditer un agent** — Formulaire guidé pour générer ou modifier un fichier agent YAML+markdown :
+  - Champs : `name`, `description`, `tools` (multi-select parmi Read/Write/Bash/Grep…), `model` (inherit/sonnet/opus/haiku), `color` (sélecteur visuel), `permissionMode`.
+  - Aperçu du frontmatter généré en temps réel.
+  - Validation : `name` doit être un slug alphanumérique.
 
-## P3 — Nouvelles fonctionnalités
+### Buddy companion
 
-- [x] **Export de la queue** — Bouton ⬇ dans le header Queue + commande `promptQueue.exportQueue` : save dialog, écrit un JSON des items pending.
-- [x] **Import de la queue** — Bouton ⬆ dans le header Queue + commande `promptQueue.importQueue` : open dialog, parse JSON, ajoute les items (déduplique par id).
-- [x] **Thème adaptatif** — `.mode-btn:hover` migré vers `var(--vscode-toolbar-hoverBackground, …)` ; toutes les autres couleurs utilisaient déjà des variables VS Code avec fallback rgba.
-- [x] **Agrégation multi-workspace** — `ClaudeLocalProvider` itère déjà tous les sous-répertoires de `~/.claude/projects/` → tous les projets Claude Code agrégés automatiquement.
-- [x] **Mode "Pause queue"** — Bouton ⏸/▶ dans le header Queue + commande `promptQueue.togglePause` : suspend/reprend le processor sans vider la queue. Bannière d'avertissement affichée quand pausé.
-- [x] **Raccourcis clavier** — `Cmd/Ctrl+Shift+R` → `promptQueue.imRateLimited` · `Cmd/Ctrl+Shift+Q` → `promptQueue.queueFromEditor`.
+- [ ] **Buddy Stats Widget** — Si `~/.claude/` contient des données buddy (généré par `/buddy` dans Claude Code ≥ 2.1.89 Pro), afficher dans le panel Usage :
+  - Espèce + emoji + rareté (Common / Uncommon / Rare / Epic / Legendary).
+  - Barre de 5 stats : DEBUGGING · PATIENCE · CHAOS · WISDOM · SNARK.
+  - Lecture seule depuis le fichier de config buddy (pas de modification — les stats sont déterministes).
+  - Masqué si aucun buddy détecté.
 
----
+### Mémoire utilisateur CLAUDE.md
 
-## P4 — Publication & CI
-
-- [x] **GitHub Actions — CI** — Workflow `.github/workflows/ci.yml` : compile + test (xvfb) sur push/PR vers main.
-- [x] **GitHub Actions — publish** — Workflow `.github/workflows/publish.yml` : publish Marketplace + Open VSX sur tag `v*` (secrets `VSCE_PAT` + `OVSX_PAT`).
-- [x] **Open VSX** — Inclus dans le workflow publish via `ovsx publish`.
-- [x] **Badges README** — CI status + Marketplace version/installs/rating.
-- [ ] **Créer les secrets GitHub** — Les workflows CI/publish sont prêts et le code est en place. Il reste uniquement à créer les deux secrets dans `GitHub → Settings → Secrets → Actions` :
-  - `VSCE_PAT` : Personal Access Token Azure DevOps (dev.azure.com → User Settings → Personal Access Tokens → New Token → scope **Marketplace > Manage**). Attention : l'organisation doit être "All accessible organizations".
-  - `OVSX_PAT` : Token Open VSX depuis open-vsx.org (compte gratuit → User Settings → Access Tokens).
+- [ ] **Éditeur CLAUDE.md global** — Ouvrir `~/.claude/CLAUDE.md` dans l'éditeur VS Code depuis la command palette (`Claude: Edit User Memory`). Crée le fichier s'il n'existe pas avec un template.
+- [ ] **Ajouter un snippet à la mémoire** — Commande `Claude: Add to Memory` : envoie la sélection active (ou une saisie) en append dans `~/.claude/CLAUDE.md` avec un timestamp. Utile pour noter des préférences ou des règles importantes à la volée.
 
 ---
 
-## Notes d'architecture futures
+## P5 — Améliorations globales de l'extension
 
-- **WebSocket / file-watch** plutôt que polling 60s — remplacer l'interval du `QueueProcessor` par un `fs.watch` sur le fichier de state pour réduire la latence de livraison à ~0.
-- **Provider plugin system** — Exposer une API d'extension pour que des tiers puissent ajouter leurs propres providers de quota (ex. Gemini, Mistral) via `contributes.usageProviders`.
+### Queue — robustesse & UX
+
+- [ ] **File-watch sur QueueProcessor** — Remplacer le polling `setInterval(60s)` par `fs.watch` sur le fichier globalState (ou un fichier sentinel) pour une latence de livraison proche de 0. Garde le polling comme fallback.
+- [ ] **Notification OS native** — Déclencher `vscode.window.showInformationMessage` + une notification système (via VS Code `vscode.env.openExternal` ou `node-notifier`) quand un prompt est livré, même si VS Code est en arrière-plan.
+- [ ] **Prompts récurrents (CRON-lite)** — Permettre de configurer un item avec une répétition (`every: "1d"`, `"1w"`). À la livraison, un nouvel item est créé avec `notBefore = now + interval`.
+- [ ] **Variables dans les prompts** — Support de tokens `{{FILE}}`, `{{SELECTION}}`, `{{WORKSPACE}}`, `{{DATE}}` dans le texte du prompt, résolus au moment de la livraison (pas de la mise en queue).
+
+### Usage Monitor — précision & contexte
+
+- [ ] **Projection de reset** — À partir des tokens courants et de l'heure de début de fenêtre, afficher "Reset estimé dans Xh" même sans message rate-limit reçu (calcul depuis `windowStart + 5h - now`). Déjà partiellement implémenté via `bestWindowEnd`.
+- [ ] **Comparaison avec la veille** — Afficher `Δ vs yesterday` sur le compteur 5h (ex. +12% par rapport à la même heure hier) pour contextualiser l'usage.
+- [ ] **Alertes visuelles inline** — Colorier le compteur de tokens en orange/rouge quand > 70%/90% du quota, sans nécessiter de popup.
+
+### Claude Commands Browser — productivité
+
+- [ ] **Exécuter une commande directement** — Bouton "Run" dans le browser : envoie `/command-name` au terminal Claude actif (via `terminal.sendText`) plutôt que de juste copier le nom.
+- [ ] **Recherche full-text dans le contenu** — La recherche actuelle filtre sur le nom et la description. Étendre au corps du fichier markdown (utile pour retrouver une commande par un mot-clé dans son implémentation).
+- [ ] **Sync bidirectionnelle** — Watcher `fs.watch` sur `.claude/commands/` pour que le browser se rafraîchisse automatiquement quand un fichier est créé/modifié/supprimé sans cliquer sur ↺.
+
+### Architecture & qualité
+
+- [ ] **WebSocket / IPC pour la livraison** — Remplacer le `terminal.sendText()` par une communication directe avec le processus Claude Code (si l'API le permet dans une future version) pour une livraison fiable sans dépendre du focus terminal.
+- [ ] **Provider plugin system** — Exposer une contribution point `contributes.usageProviders` pour que des extensions tierces puissent ajouter des providers (Gemini, Mistral, Grok…) sans modifier cette extension.
+- [ ] **Tests E2E avec @vscode/test-electron** — Les tests actuels sont des tests unitaires purs. Ajouter 2-3 tests E2E qui ouvrent une vraie fenêtre VS Code et valident les flux critiques (enqueue → process → delivery log).
+- [ ] **Telemetry opt-in** — Compteur d'utilisation anonyme (nb de prompts livrés, providers configurés) via `vscode.env.isTelemetryEnabled`, pour prioriser les features futures.
+
+---
+
+## Notes d'architecture
+
+- **File-watch vs polling** — `fs.watch` sur `~/.claude/projects/` permettrait de mettre à jour le Usage Monitor en temps réel sans attendre le refresh toutes les 10min.
+- **Provider plugin system** — Déjà en roadmap. Design suggéré : `contributes.usageProviders` → tableau de `{ name, configKeys[], fetchUsage }`.
+- **Agents + Commands unifiés** — Les agents (`~/.claude/agents/`) et les commands (`.claude/commands/`) sont conceptuellement similaires (fichiers markdown avec frontmatter). Envisager une vue unifiée "Claude Resources" avec tabs Agents / Commands / Skills / MCP.
