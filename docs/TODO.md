@@ -73,7 +73,6 @@
 - [ ] **Créer les secrets GitHub** — Les workflows CI/publish sont prêts et le code est en place. Il reste uniquement à créer les deux secrets dans `GitHub → Settings → Secrets → Actions` :
   - `VSCE_PAT` : Personal Access Token Azure DevOps (dev.azure.com → User Settings → Personal Access Tokens → New Token → scope **Marketplace > Manage**). Attention : l'organisation doit être "All accessible organizations".
   - `OVSX_PAT` : Token Open VSX depuis open-vsx.org (compte gratuit → User Settings → Access Tokens).
-  - Une fois les deux secrets ajoutés : `git tag v0.3.2 && git push origin v0.3.2` déclenche la publication automatique.
 
 ---
 
