@@ -414,6 +414,34 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  const cmdExportQueue = vscode.commands.registerCommand(
+    "promptQueue.exportQueue",
+    () => queueWebviewProvider.exportQueue(),
+  );
+
+  const cmdImportQueue = vscode.commands.registerCommand(
+    "promptQueue.importQueue",
+    () => queueWebviewProvider.importQueue(),
+  );
+
+  const cmdTogglePause = vscode.commands.registerCommand(
+    "promptQueue.togglePause",
+    async () => {
+      processor.togglePause();
+      // Persist pause state so it survives VS Code restarts.
+      await context.globalState.update(
+        "promptQueue.paused",
+        processor.isPaused(),
+      );
+      queueWebviewProvider.refresh();
+      vscode.window.showInformationMessage(
+        processor.isPaused()
+          ? "PromptQueue: Queue processing paused."
+          : "PromptQueue: Queue processing resumed.",
+      );
+    },
+  );
+
   // ── Register everything ────────────────────────────────────────────────────
   context.subscriptions.push(
     cmdQueuePrompt,
@@ -421,6 +449,9 @@ export function activate(context: vscode.ExtensionContext): void {
     cmdQueueFromEditor,
     cmdImRateLimited,
     cmdProcessNow,
+    cmdExportQueue,
+    cmdImportQueue,
+    cmdTogglePause,
     cmdRefreshUsage,
     cmdSetLimits,
     cmdShowSummary,
@@ -431,6 +462,15 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // ── Start background processes ─────────────────────────────────────────────
+
+  // Restore pause state persisted from the previous session.
+  if (context.globalState.get<boolean>("promptQueue.paused", false)) {
+    processor.togglePause();
+    log.appendLine(
+      "[Extension] Queue restored as paused from previous session.",
+    );
+  }
+
   processor.start();
 
   // Also trigger processing when VS Code window gains focus (handles wake-from-sleep).

@@ -1,6 +1,11 @@
 import * as vscode from "vscode";
 import * as nodeCrypto from "crypto";
-import { QueueStore, QueueItem, DeliveryLogEntry } from "../queue/QueueStore";
+import {
+  QueueStore,
+  QueueItem,
+  DeliveryLogEntry,
+  isValidQueueItemShape,
+} from "../queue/QueueStore";
 import { QueueProcessor } from "../queue/QueueProcessor";
 import { generateShortId } from "../util/crypto";
 import {
@@ -22,7 +27,10 @@ type InMsg =
   | { type: "processNow" }
   | { type: "forceSend"; id: string }
   | { type: "snoozeItem"; id: string; minutes: number }
-  | { type: "editItem"; id: string; promptText: string; notBefore: string };
+  | { type: "editItem"; id: string; promptText: string; notBefore: string }
+  | { type: "exportQueue" }
+  | { type: "importQueue" }
+  | { type: "togglePause" };
 
 // ── Message types (extension → webview) ───────────────────────────────────────
 type OutMsg =
@@ -32,6 +40,7 @@ type OutMsg =
       type: "queueUpdated";
       items: QueueItem[];
       deliveryLog: DeliveryLogEntry[];
+      paused: boolean;
     }
   | { type: "queued" }
   | { type: "toast"; level: "info" | "warn" | "error"; message: string };
@@ -78,6 +87,102 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     this.sendQueue();
   }
 
+  /**
+   * Export pending queue items to a JSON file chosen by the user.
+   * Machine-specific fields (workspaceFolder, targetTerminalName, deliveryAttempts)
+   * are stripped so the export is portable across machines.
+   */
+  async exportQueue(): Promise<void> {
+    const items = this.store.getPending();
+    if (items.length === 0) {
+      vscode.window.showInformationMessage(
+        "PromptQueue: Nothing to export — queue is empty.",
+      );
+      return;
+    }
+    const uri = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file("prompt-queue-export.json"),
+      filters: { JSON: ["json"] },
+      title: "Export Prompt Queue",
+    });
+    if (!uri) {
+      return;
+    }
+    // Strip machine-specific fields — they won't transfer to another workspace.
+    const portable = items.map(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      ({
+        workspaceFolder: _wf,
+        targetTerminalName: _tn,
+        deliveryAttempts: _da,
+        ...rest
+      }) => rest,
+    );
+    await vscode.workspace.fs.writeFile(
+      uri,
+      Buffer.from(JSON.stringify(portable, null, 2), "utf8"),
+    );
+    vscode.window.showInformationMessage(
+      `PromptQueue: Exported ${items.length} item(s).`,
+    );
+  }
+
+  /**
+   * Import queue items from a JSON file chosen by the user.
+   * - Validates required fields (id, promptText, notBefore) before inserting.
+   * - Resets machine-specific fields to safe defaults for the current machine.
+   * - Skips duplicates (same id already in store).
+   */
+  async importQueue(): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      filters: { JSON: ["json"] },
+      title: "Import Prompt Queue",
+    });
+    if (!uris || uris.length === 0) {
+      return;
+    }
+    const content = await vscode.workspace.fs.readFile(uris[0]);
+    let rawItems: unknown[];
+    try {
+      const parsed: unknown = JSON.parse(Buffer.from(content).toString("utf8"));
+      if (!Array.isArray(parsed)) {
+        throw new Error("not an array");
+      }
+      rawItems = parsed;
+    } catch {
+      this.post({
+        type: "toast",
+        level: "error",
+        message: "Invalid JSON file — expected an array of queue items.",
+      });
+      return;
+    }
+
+    const existing = new Set(this.store.getAll().map((i) => i.id));
+    let added = 0;
+    for (const raw of rawItems) {
+      if (!isValidQueueItemShape(raw) || existing.has(raw.id)) {
+        continue;
+      }
+      await this.store.add({
+        ...raw,
+        processed: false,
+        deliveryAttempts: 0,
+        // Reset machine-specific routing to safe defaults for the current machine.
+        workspaceFolder:
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "",
+        targetTerminalName: undefined,
+      });
+      added++;
+    }
+    this.sendQueue();
+    const skipped = rawItems.length - added;
+    vscode.window.showInformationMessage(
+      `PromptQueue: Imported ${added} item(s)${skipped > 0 ? ` (${skipped} skipped — invalid or duplicate)` : ""}.`,
+    );
+  }
+
   private updateBadge(): void {
     if (!this._view) {
       return;
@@ -101,6 +206,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
       type: "queueUpdated",
       items: this.store.getAll(),
       deliveryLog: this.store.getDeliveryLog(),
+      paused: this.processor.isPaused(),
     });
   }
 
@@ -243,6 +349,19 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         this.sendQueue();
         break;
       }
+
+      case "exportQueue":
+        await this.exportQueue();
+        break;
+
+      case "importQueue":
+        await this.importQueue();
+        break;
+
+      case "togglePause":
+        // Delegate to command so extension.ts can persist state in globalState.
+        await vscode.commands.executeCommand("promptQueue.togglePause");
+        break;
     }
   }
 
@@ -351,7 +470,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     cursor: pointer;
     transition: background .1s, color .1s;
   }
-  .mode-btn:hover { background: rgba(128,128,128,.15); }
+  .mode-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.15)); }
   .mode-btn.active {
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
@@ -658,6 +777,16 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   }
   .history-item.failed .history-preview { color: var(--vscode-errorForeground, #f48771); }
 
+  /* ── Pause notice ────────────────────────────────────────────────────── */
+  .pause-notice {
+    font-size: 0.82em;
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    background: var(--vscode-inputValidation-warningBackground, rgba(204,167,0,.12));
+    border-radius: 3px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+  }
+
   /* ── Toast ────────────────────────────────────────────────────────────── */
   #toast {
     position: sticky;
@@ -669,8 +798,8 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     display: none;
     margin-top: 8px;
   }
-  #toast.info { background: var(--vscode-editorInfo-background, #1b4b6e); color: var(--vscode-editorInfo-foreground, #75bfff); }
-  #toast.warn { background: var(--vscode-editorWarning-background, #5a4b00); color: var(--vscode-editorWarning-foreground, #cca700); }
+  #toast.info { background: var(--vscode-inputValidation-infoBackground, var(--vscode-editorInfo-background)); color: var(--vscode-inputValidation-infoForeground, var(--vscode-editorInfo-foreground)); }
+  #toast.warn { background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWarning-background)); color: var(--vscode-inputValidation-warningForeground, var(--vscode-editorWarning-foreground)); }
   #toast.error { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-errorForeground, #f48771); }
 </style>
 </head>
@@ -736,8 +865,12 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   <div class="queue-header section-title">
     <span class="title">Queue</span>
     <span class="badge" id="pendingBadge">0</span>
+    <button class="btn-icon" id="pauseBtn" title="Pause queue processing">⏸</button>
+    <button class="btn-icon" id="exportBtn" title="Export queue to JSON">⬇</button>
+    <button class="btn-icon" id="importBtn" title="Import queue from JSON">⬆</button>
     <button class="btn-icon" id="processNowBtn" title="Process due items now">↻</button>
   </div>
+  <div id="pauseNotice" class="pause-notice" style="display:none">⏸ Queue processing paused</div>
   <div id="queueList"><div class="empty-state">No prompts queued yet.</div></div>
 </div>
 
@@ -781,6 +914,10 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   const queueBtn      = document.getElementById('queueBtn');
   const pendingBadge  = document.getElementById('pendingBadge');
   const queueList     = document.getElementById('queueList');
+  const pauseBtn        = document.getElementById('pauseBtn');
+  const exportBtn       = document.getElementById('exportBtn');
+  const importBtn       = document.getElementById('importBtn');
+  const pauseNotice     = document.getElementById('pauseNotice');
   const processNowBtn   = document.getElementById('processNowBtn');
   const toast           = document.getElementById('toast');
   const historySection  = document.getElementById('historySection');
@@ -844,6 +981,18 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     vscode.postMessage({ type: 'processNow' });
   });
 
+  pauseBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'togglePause' });
+  });
+
+  exportBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'exportQueue' });
+  });
+
+  importBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'importQueue' });
+  });
+
   // ── Messages from extension ───────────────────────────────────────────────
   window.addEventListener('message', ({ data: msg }) => {
     switch (msg.type) {
@@ -881,6 +1030,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
 
       case 'queueUpdated':
         lastItems = msg.items;
+        updatePauseState(msg.paused); // update before render so item buttons reflect current state
         renderQueueItems(lastItems);
         renderDeliveryLog(msg.deliveryLog || []);
         break;
@@ -994,6 +1144,16 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     queueBtn.disabled = !promptInput.value.trim();
   }
 
+  // ── Pause state ───────────────────────────────────────────────────────────
+  let queueIsPaused = false;
+
+  function updatePauseState(paused) {
+    queueIsPaused = paused;
+    pauseBtn.textContent = paused ? '▶' : '⏸';
+    pauseBtn.title = paused ? 'Resume queue processing' : 'Pause queue processing';
+    pauseNotice.style.display = paused ? '' : 'none';
+  }
+
   // ── Queue list render ─────────────────────────────────────────────────────
   let editingId = null;
 
@@ -1037,11 +1197,12 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>\` : \`<div class="item-preview">\${esc(previewTrunc)}</div>\`;
 
+      const sendTitle = queueIsPaused ? 'Force-send to Claude now (bypasses pause)' : 'Send to Claude now';
       const actions = !item.processed ? \`<div class="item-actions">
     <button class="item-snooze" data-id="\${item.id}" data-minutes="15" title="Snooze +15 min">+15m</button>
     <button class="item-snooze" data-id="\${item.id}" data-minutes="60" title="Snooze +1 hour">+1h</button>
     <button class="item-edit" data-id="\${item.id}" title="Edit">✏</button>
-    <button class="item-send" data-id="\${item.id}" title="Send to Claude now">➤</button>
+    <button class="item-send" data-id="\${item.id}" title="\${sendTitle}">➤</button>
     <button class="item-delete" data-id="\${item.id}" title="Remove">×</button>
   </div>\` : '';
 

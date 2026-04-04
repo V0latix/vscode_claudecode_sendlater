@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.5] — 2026-04-04
+
+### Added
+- **Export de la queue** — Bouton ⬇ dans le header Queue + commande palette `PromptQueue: Export Queue to JSON`. Exporte les items en attente dans un fichier JSON portable (les champs machine-spécifiques `workspaceFolder`, `targetTerminalName`, `deliveryAttempts` sont retirés).
+- **Import de la queue** — Bouton ⬆ + commande palette `PromptQueue: Import Queue from JSON`. Valide les champs obligatoires (`id`, `promptText`, `notBefore`) avant insertion ; resets les champs machine-spécifiques aux valeurs locales ; ignore les doublons.
+- **Mode "Pause queue"** — Bouton ⏸/▶ dans le header Queue + commande `PromptQueue: Pause / Resume Queue Processing`. Suspend le processor sans vider la queue. État persisté dans `globalState` et restauré au redémarrage. Bannière d'avertissement affichée quand pausé.
+- **Raccourcis clavier** — `Ctrl+Alt+R` / `Cmd+Alt+R` → `promptQueue.imRateLimited` (hors terminal) · `Ctrl+Alt+Q` / `Cmd+Alt+Q` → `promptQueue.queueFromEditor` (focus éditeur).
+
+### Fixed
+- **Import : validation stricte** — `isValidQueueItemShape()` rejette tout item sans `id`, avec `promptText` vide ou avec `notBefore` invalide, évitant un crash `isOverdue(new Date(undefined))`.
+- **Import : champs machine réinitialisés** — `workspaceFolder` et `targetTerminalName` sont remis aux valeurs de la machine courante à l'import pour éviter un `NonRetryableDeliveryError` silencieux (terminal introuvable).
+- **Pause : persistance** — `_paused` n'était que mémoriel ; l'état est maintenant écrit dans `context.globalState` à chaque toggle et relu au démarrage.
+- **`forceDeliver` + pause** — le bouton ➤ affiche un tooltip explicite `"Force-send (bypasses pause)"` quand la queue est pausée, rendant le comportement délibéré visible.
+- **Keybindings** — `Ctrl+Shift+R` remplacé par `Ctrl+Alt+R` (évite le conflit avec Reload Window) ; ajout de conditions `when` (`!terminalFocus` / `editorTextFocus`) pour ne pas interférer hors contexte éditeur.
+- **Indirection executeCommand supprimée** — export/import implémentés directement dans `QueueWebviewProvider.exportQueue()` / `importQueue()` ; les commandes de la palette délèguent au provider (pas de race condition au démarrage).
+- **Toast CSS dark-mode** — les fallbacks `#1b4b6e` / `#5a4b00` (couleurs dark-mode) remplacés par `var(--vscode-inputValidation-infoBackground/warningBackground)` qui s'adaptent aux thèmes clairs.
+- **Thème adaptatif** — `isValidQueueItemShape` exportée comme fonction testable depuis `QueueStore.ts`.
+
+### Tests
+- 18 nouveaux tests unitaires (`src/test/suite/p3features.test.ts`) : 12 tests `isValidQueueItemShape` (champs manquants, vides, dates invalides, shape portable) + 6 tests `QueueProcessor.pause` (état initial, toggle, double-toggle, `process()` retourne 0, `process()` reprend après resume, `onDidChange` déclenché).
+
 ## [0.3.4] — 2026-04-04
 
 ### Fixed

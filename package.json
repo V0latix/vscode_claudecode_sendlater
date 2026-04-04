@@ -2,7 +2,7 @@
   "name": "prompt-queue-usage-monitor",
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "publisher": "v0latix",
   "license": "MIT",
   "repository": {
@@ -92,6 +92,21 @@
         "command": "usage.setLimits",
         "title": "Calibrate Limits from claude.ai %",
         "category": "Usage"
+      },
+      {
+        "command": "promptQueue.exportQueue",
+        "title": "Export Queue to JSON",
+        "category": "PromptQueue"
+      },
+      {
+        "command": "promptQueue.importQueue",
+        "title": "Import Queue from JSON",
+        "category": "PromptQueue"
+      },
+      {
+        "command": "promptQueue.togglePause",
+        "title": "Pause / Resume Queue Processing",
+        "category": "PromptQueue"
       }
     ],
     "configuration": {
@@ -243,9 +258,32 @@
         },
         {
           "command": "promptQueue.processNow"
+        },
+        {
+          "command": "promptQueue.exportQueue"
+        },
+        {
+          "command": "promptQueue.importQueue"
+        },
+        {
+          "command": "promptQueue.togglePause"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "promptQueue.imRateLimited",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "promptQueue.queueFromEditor",
+        "key": "ctrl+alt+q",
+        "mac": "cmd+alt+q",
+        "when": "editorTextFocus"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

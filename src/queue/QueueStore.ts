@@ -123,3 +123,24 @@ export class QueueStore {
     await this.state.update(DELIVERY_LOG_KEY, []);
   }
 }
+
+/**
+ * Type-guard for untrusted data coming from an imported JSON file.
+ * Returns true only if the object has the minimum fields required for a
+ * safe queue item: a non-empty id, a non-empty promptText, and a valid
+ * ISO notBefore date.
+ */
+export function isValidQueueItemShape(raw: unknown): raw is QueueItem {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  const item = raw as Record<string, unknown>;
+  return (
+    typeof item.id === "string" &&
+    item.id.length > 0 &&
+    typeof item.promptText === "string" &&
+    (item.promptText as string).trim().length > 0 &&
+    typeof item.notBefore === "string" &&
+    !isNaN(new Date(item.notBefore as string).getTime())
+  );
+}

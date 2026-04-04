@@ -27,6 +27,7 @@ export class QueueProcessor {
   private readonly store: QueueStore;
   private readonly log: vscode.OutputChannel;
   private timer: ReturnType<typeof setInterval> | undefined;
+  private _paused = false;
 
   /** Fires whenever items change (for tree-view refresh). */
   readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
@@ -42,6 +43,19 @@ export class QueueProcessor {
     this.timer = setInterval(() => this.process(), PROCESS_INTERVAL_MS);
   }
 
+  isPaused(): boolean {
+    return this._paused;
+  }
+
+  /** Toggle queue processing on/off. Fires onDidChange so UI updates immediately. */
+  togglePause(): void {
+    this._paused = !this._paused;
+    this.log.appendLine(
+      `[QueueProcessor] Queue ${this._paused ? "paused" : "resumed"}.`,
+    );
+    this.onDidChangeEmitter.fire();
+  }
+
   /** Stop the background polling interval. */
   stop(): void {
     if (this.timer !== undefined) {
@@ -52,6 +66,10 @@ export class QueueProcessor {
 
   /** Process all due items immediately. Returns number of items delivered. */
   async process(): Promise<number> {
+    if (this._paused) {
+      this.log.appendLine("[QueueProcessor] Skipping — queue is paused.");
+      return 0;
+    }
     const pending = this.store.getPending();
     const due = pending.filter((i) => isOverdue(new Date(i.notBefore)));
 
@@ -118,7 +136,11 @@ export class QueueProcessor {
     return due.length;
   }
 
-  /** Force-deliver a specific item immediately, regardless of its notBefore time. */
+  /**
+   * Force-deliver a specific item immediately, regardless of its notBefore time.
+   * Intentionally bypasses the `_paused` flag — "force" means the user explicitly
+   * overrides all scheduling constraints, including a manual pause.
+   */
   async forceDeliver(id: string): Promise<void> {
     const item = this.store.getAll().find((i) => i.id === id && !i.processed);
     if (!item) {

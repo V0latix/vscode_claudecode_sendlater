@@ -55,12 +55,12 @@
 
 ## P3 — Nouvelles fonctionnalités
 
-- [ ] **Export de la queue** — Bouton "Export as JSON" pour sauvegarder les items en attente (backup ou migration entre workspaces).
-- [ ] **Import de la queue** — Charger un JSON exporté précédemment.
-- [ ] **Thème adaptatif** — Les webviews utilisent des couleurs CSS codées en dur par endroits. Migrer vers les variables CSS de VS Code (`--vscode-*`) pour respecter pleinement les thèmes custom.
-- [ ] **Agrégation multi-workspace** — Le `UsageService` ne voit qu'un workspace. Permettre d'agréger l'usage de plusieurs dossiers de projets Claude (`~/.claude/projects/` liste tous les projets).
-- [ ] **Mode "Pause queue"** — Bouton global pour suspendre le processor sans vider la queue (utile en réunion ou démo).
-- [ ] **Raccourcis clavier** — Enregistrer des keybindings par défaut pour les commandes les plus fréquentes (`promptQueue.imRateLimited`, `promptQueue.queueFromEditor`).
+- [x] **Export de la queue** — Bouton ⬇ dans le header Queue + commande `promptQueue.exportQueue` : save dialog, écrit un JSON des items pending.
+- [x] **Import de la queue** — Bouton ⬆ dans le header Queue + commande `promptQueue.importQueue` : open dialog, parse JSON, ajoute les items (déduplique par id).
+- [x] **Thème adaptatif** — `.mode-btn:hover` migré vers `var(--vscode-toolbar-hoverBackground, …)` ; toutes les autres couleurs utilisaient déjà des variables VS Code avec fallback rgba.
+- [x] **Agrégation multi-workspace** — `ClaudeLocalProvider` itère déjà tous les sous-répertoires de `~/.claude/projects/` → tous les projets Claude Code agrégés automatiquement.
+- [x] **Mode "Pause queue"** — Bouton ⏸/▶ dans le header Queue + commande `promptQueue.togglePause` : suspend/reprend le processor sans vider la queue. Bannière d'avertissement affichée quand pausé.
+- [x] **Raccourcis clavier** — `Cmd/Ctrl+Shift+R` → `promptQueue.imRateLimited` · `Cmd/Ctrl+Shift+Q` → `promptQueue.queueFromEditor`.
 
 ---
 
