@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.7] — 2026-04-08
+
+### Added
+- **Éditeur de settings Claude Code** — Nouveau panel "Claude Settings" dans la barre latérale. Permet d'éditer `~/.claude/settings.json` sans toucher le fichier brut :
+  - Toggle `includeCoAuthoredBy` (co-author dans les commits git).
+  - Sélecteur de thème `light` / `dark` / `system` (ou *(not set)* pour supprimer la clé).
+  - Listes éditables `permissions.allow` et `permissions.deny` avec boutons +Add / ×Remove.
+  - Bouton "Open raw settings.json" pour les cas avancés.
+- **Commande palette** `Claude: Edit User Settings (settings.json)` — ouvre directement `~/.claude/settings.json` dans l'éditeur VS Code.
+
+### Fixed
+- **Settings write: JSON invalide ne détruit plus la config** — Si `~/.claude/settings.json` contient du JSON mal formé, `writeSettings()` renvoie maintenant une erreur bloquante et laisse le fichier intact. L'ancienne implémentation écrasait silencieusement tout le contenu avec `{}` lors du prochain save.
+- **Settings write: écriture atomique** — Le save passe par un fichier temporaire `.tmp` suivi d'un `rename()` POSIX atomique. Élimine le risque de fichier tronqué en cas d'interruption et les conflits d'écriture concurrente.
+- **Settings UI: "(not set)" supprime réellement la clé `theme`** — Le webview envoyait `theme: undefined`, que le service ignorait, laissant l'ancienne valeur intacte. Il envoie maintenant `theme: null` ; le service interprète `null` comme "supprimer la clé".
+
+### Tests
+- 24 nouveaux tests unitaires (`src/test/suite/settings.test.ts`) :
+  - `readSettings` : fichier absent, bool, thème, thème invalide ignoré, permissions, clés inconnues, JSON invalide, items non-string filtrés.
+  - `writeSettings` : création, JSON valide, round-trip, préservation clés inconnues, merge partiel, merge permissions, round-trip complet, JSON invalide non-destructif, pas de `.tmp` orphelin, `theme: null` supprime la clé, round-trip set/unset, `theme: undefined` préserve la valeur existante.
+
 ## [0.3.6] — 2026-04-07
 
 ### Added

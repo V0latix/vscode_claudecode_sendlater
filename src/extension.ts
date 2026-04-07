@@ -11,6 +11,8 @@ import { UsageService } from "./usage/UsageService";
 import { UsageWebviewProvider } from "./ui/UsageWebviewProvider";
 import { QueueWebviewProvider } from "./ui/QueueWebviewProvider";
 import { ClaudeCommandsWebviewProvider } from "./ui/ClaudeCommandsWebviewProvider";
+import { ClaudeSettingsWebviewProvider } from "./ui/ClaudeSettingsWebviewProvider";
+import { SETTINGS_PATH } from "./settings/ClaudeSettingsService";
 import { generateShortId } from "./util/crypto";
 import {
   addHours,
@@ -44,6 +46,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const usageWebviewProvider = new UsageWebviewProvider(usageService);
   const queueWebviewProvider = new QueueWebviewProvider(store, processor, log);
   const claudeCommandsProvider = new ClaudeCommandsWebviewProvider();
+  const claudeSettingsProvider = new ClaudeSettingsWebviewProvider();
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -59,6 +62,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(
       ClaudeCommandsWebviewProvider.viewType,
       claudeCommandsProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+    vscode.window.registerWebviewViewProvider(
+      ClaudeSettingsWebviewProvider.viewType,
+      claudeSettingsProvider,
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
   );
@@ -442,6 +450,14 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  const cmdOpenRawSettings = vscode.commands.registerCommand(
+    "claude.openRawSettings",
+    async () => {
+      const uri = vscode.Uri.file(SETTINGS_PATH);
+      await vscode.commands.executeCommand("vscode.open", uri);
+    },
+  );
+
   // ── Register everything ────────────────────────────────────────────────────
   context.subscriptions.push(
     cmdQueuePrompt,
@@ -459,6 +475,7 @@ export function activate(context: vscode.ExtensionContext): void {
     cmdSetAnthropicKey,
     cmdClearOpenAIKey,
     cmdClearAnthropicKey,
+    cmdOpenRawSettings,
   );
 
   // ── Start background processes ─────────────────────────────────────────────

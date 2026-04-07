@@ -2,7 +2,7 @@
   "name": "prompt-queue-usage-monitor",
   "displayName": "Prompt Queue + Usage Monitor",
   "description": "Queue prompts for later delivery (rate-limit bypass) and monitor AI token usage (Claude / OpenAI Codex).",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "publisher": "v0latix",
   "license": "MIT",
   "repository": {
@@ -107,6 +107,11 @@
         "command": "promptQueue.togglePause",
         "title": "Pause / Resume Queue Processing",
         "category": "PromptQueue"
+      },
+      {
+        "command": "claude.openRawSettings",
+        "title": "Edit User Settings (settings.json)",
+        "category": "Claude"
       }
     ],
     "configuration": {
@@ -211,6 +216,11 @@
           "id": "claudeCommandsView",
           "name": "Claude Commands",
           "type": "webview"
+        },
+        {
+          "id": "claudeSettingsView",
+          "name": "Claude Settings",
+          "type": "webview"
         }
       ]
     },
@@ -267,6 +277,9 @@
         },
         {
           "command": "promptQueue.togglePause"
+        },
+        {
+          "command": "claude.openRawSettings"
         }
       ]
     },
