@@ -31,6 +31,11 @@ export interface TokenUsage {
    * Array of 24 values, index 0 = oldest hour (23-24h ago), index 23 = current hour (0-1h ago).
    */
   hourlyLast24h?: number[];
+  /**
+   * Token counts per day for the last 7 days.
+   * Array of 7 values, index 0 = oldest day (6 days ago), index 6 = today.
+   */
+  dailyLast7d?: number[];
   /** Session (last 5h / per-session) quota from claude.ai. */
   sessionUsage?: {
     used: number;

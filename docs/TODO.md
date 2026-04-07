@@ -31,11 +31,14 @@ Voir CHANGELOG v0.3.3–v0.3.5 pour le détail. Résumé des grandes features li
 
 > **Contexte :** Claude Code stocke sa configuration dans `~/.claude/settings.json` (permissions, env vars, theme, co-author flag) et ses agents dans `~/.claude/agents/*.md` (frontmatter YAML : name, description, tools, model, color, permissionMode). Une UI VS Code pour gérer tout ça éviterait d'éditer ces fichiers à la main.
 
+### Amélioration de l'UI
+
+  - Retirer la partie haute de la partie prompt queue avec la detection des rate-limit.
+  - Ajouté des stats des tokens dans la semaine et pas seulement dans les 24h.
+  
 ### Éditeur de settings Claude Code
 
-- [ ] **Settings Editor UI** — Panel webview pour éditer `~/.claude/settings.json` sans ouvrir le fichier JSON brut :
   - Toggle `includeCoAuthoredBy` (co-author dans les commits git).
-  - `env` object : ajouter/supprimer des variables d'environnement globales (ex. `ANTHROPIC_MODEL`, `MAX_TOKENS`).
   - `permissions.allow` / `permissions.deny` : liste éditable des règles d'accès aux outils (ex. `Bash(git log *)`, `Read`, `Write`).
   - Sélecteur de thème (`light` / `dark` / `system`) si le champ est présent.
   - Bouton "Ouvrir le fichier brut" pour les cas avancés.

@@ -8,18 +8,11 @@ import {
 } from "../queue/QueueStore";
 import { QueueProcessor } from "../queue/QueueProcessor";
 import { generateShortId } from "../util/crypto";
-import {
-  addMinutes,
-  formatDisplayTime,
-  isOverdue,
-  parseRateLimitMessage,
-  RateLimitInfo,
-} from "../util/time";
+import { addMinutes, formatDisplayTime, isOverdue } from "../util/time";
 
 // ── Message types (webview → extension) ───────────────────────────────────────
 type InMsg =
   | { type: "ready" }
-  | { type: "detectRateLimit" }
   | { type: "pasteClipboard" }
   | { type: "useSelection" }
   | { type: "queuePrompt"; promptText: string; delayMinutes: number }
@@ -34,7 +27,6 @@ type InMsg =
 
 // ── Message types (extension → webview) ───────────────────────────────────────
 type OutMsg =
-  | { type: "rateLimitDetected"; info: RateLimitInfo | null }
   | { type: "textLoaded"; text: string }
   | {
       type: "queueUpdated";
@@ -214,11 +206,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case "ready":
         this.sendQueue();
-        await this.tryDetect(); // auto-parse clipboard on first render
-        break;
-
-      case "detectRateLimit":
-        await this.tryDetect();
         break;
 
       case "pasteClipboard": {
@@ -365,16 +352,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async tryDetect(): Promise<void> {
-    try {
-      const clip = await vscode.env.clipboard.readText();
-      const info = clip.trim() ? parseRateLimitMessage(clip) : null;
-      this.post({ type: "rateLimitDetected", info: info ?? null });
-    } catch {
-      this.post({ type: "rateLimitDetected", info: null });
-    }
-  }
-
   // ── HTML ───────────────────────────────────────────────────────────────────
 
   private buildHtml(): string {
@@ -415,39 +392,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-
-  /* ── Rate limit card ──────────────────────────────────────────────────── */
-  .rl-card {
-    background: var(--vscode-editorWidget-background, var(--vscode-input-background));
-    border: 1px solid var(--vscode-input-border, transparent);
-    border-radius: 4px;
-    padding: 8px 10px;
-    margin-bottom: 8px;
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .rl-icon { font-size: 1.1em; flex-shrink: 0; }
-  .rl-text { flex: 1; }
-  .rl-label {
-    font-weight: 600;
-    color: var(--vscode-foreground);
-  }
-  .rl-sub {
-    font-size: 0.82em;
-    color: var(--vscode-descriptionForeground);
-    margin-top: 1px;
-  }
-  .rl-card.detected {
-    border-color: var(--vscode-focusBorder, #007acc);
-    background: var(--vscode-editor-selectionHighlightBackground,
-      color-mix(in srgb, var(--vscode-focusBorder, #007acc) 10%, transparent));
-  }
-  .rl-card.none {
-    border-style: dashed;
-    color: var(--vscode-descriptionForeground);
   }
 
   /* ── Mode toggle ──────────────────────────────────────────────────────── */
@@ -805,23 +749,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
 
-<!-- ── Rate limit section ─────────────────────────────────────────────────── -->
-<div class="section">
-  <div class="section-title">⏰ Rate Limit</div>
-
-  <div class="rl-card none" id="rlCard">
-    <span class="rl-icon" id="rlIcon">🔍</span>
-    <div class="rl-text">
-      <div class="rl-label" id="rlLabel">No rate limit detected</div>
-      <div class="rl-sub" id="rlSub">Copy the error message and click below</div>
-    </div>
-  </div>
-
-  <button class="btn-secondary" id="detectBtn">
-    🔍 Detect from clipboard
-  </button>
-</div>
-
 <!-- ── New prompt form ────────────────────────────────────────────────────── -->
 <div class="section">
   <div class="section-title">✏️ Your Prompt</div>
@@ -894,11 +821,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   let lastItems = []; // last queue snapshot, used for local re-renders
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
-  const rlCard        = document.getElementById('rlCard');
-  const rlIcon        = document.getElementById('rlIcon');
-  const rlLabel       = document.getElementById('rlLabel');
-  const rlSub         = document.getElementById('rlSub');
-  const detectBtn     = document.getElementById('detectBtn');
   const modeDelayBtn  = document.getElementById('modeDelay');
   const modeAtBtn     = document.getElementById('modeAt');
   const rowDelay      = document.getElementById('rowDelay');
@@ -934,10 +856,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   updateQueueBtn();
 
   // ── Event listeners ───────────────────────────────────────────────────────
-  detectBtn.addEventListener('click', () => {
-    vscode.postMessage({ type: 'detectRateLimit' });
-  });
-
   modeDelayBtn.addEventListener('click', () => { applyMode('delay'); persist(); });
   modeAtBtn.addEventListener('click',    () => { applyMode('at');    persist(); });
 
@@ -997,28 +915,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   window.addEventListener('message', ({ data: msg }) => {
     switch (msg.type) {
 
-      case 'rateLimitDetected':
-        renderRateLimit(msg.info);
-        if (msg.info) {
-          if (msg.info.resetAt) {
-            // Switch to "at time" mode and fill the target time
-            const d = new Date(msg.info.resetAt);
-            const hh = String(d.getHours()).padStart(2, '0');
-            const mm = String(d.getMinutes()).padStart(2, '0');
-            atTimeInput.value = hh + ':' + mm;
-            applyMode('at');
-            updateDeliveryTimeAt();
-          } else {
-            // Fall back to minutes mode
-            delayMinutes = Math.round(msg.info.delayHours * 60);
-            delayInput.value = delayMinutes;
-            applyMode('delay');
-            updateDeliveryTime();
-          }
-          persist();
-        }
-        break;
-
       case 'textLoaded':
         promptInput.value = msg.text;
         promptText = msg.text;
@@ -1057,28 +953,6 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         break;
     }
   });
-
-  // ── Rate limit render ─────────────────────────────────────────────────────
-  function renderRateLimit(info) {
-    if (!info) {
-      rlCard.className = 'rl-card none';
-      rlIcon.textContent = '🔍';
-      rlLabel.textContent = 'No rate limit detected';
-      rlSub.textContent = 'Copy the error message and click below';
-      return;
-    }
-    rlCard.className = 'rl-card detected';
-    rlIcon.textContent = '⏰';
-    const h = Math.floor(info.delayHours);
-    const m = Math.round((info.delayHours - h) * 60);
-    const timeLabel = info.resetAt
-      ? 'at ' + formatTime(new Date(info.resetAt))
-      : 'in ' + info.delayHours + 'h';
-    rlLabel.textContent = 'Rate limit detected — resets ' + timeLabel;
-    rlSub.textContent =
-      (h > 0 ? h + 'h ' : '') + (m > 0 ? m + 'min ' : '') +
-      '· ' + (info.confidence === 'high' ? 'high confidence' : info.confidence + ' confidence');
-  }
 
   // ── Mode helpers ──────────────────────────────────────────────────────────
   function applyMode(mode) {

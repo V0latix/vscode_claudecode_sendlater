@@ -23,6 +23,8 @@ export interface AggregatedUsage {
   modelBreakdown?: import("./IUsageProvider").ModelBreakdown[];
   /** 24-hour hourly sparkline from the best provider (may be undefined). */
   hourlyLast24h?: number[];
+  /** 7-day daily sparkline from the best provider (may be undefined). */
+  dailyLast7d?: number[];
   /** Start of the current rate-limit window (from ClaudeLocalProvider). */
   bestWindowStart?: Date;
   /** When the current rate-limit window resets (from ClaudeLocalProvider). */
@@ -131,6 +133,7 @@ export class UsageService {
       lastRefreshed: new Date(),
       modelBreakdown: bestSource?.usage.breakdown,
       hourlyLast24h: bestSource?.usage.hourlyLast24h,
+      dailyLast7d: bestSource?.usage.dailyLast7d,
       bestWindowStart: bestSource?.usage.currentWindowStart,
       bestWindowEnd: bestSource?.usage.currentWindowEnd,
     };

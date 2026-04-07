@@ -108,6 +108,7 @@ export class ClaudeLocalProvider implements IUsageProvider {
     let tokens7d = 0;
     const breakdownMap = new Map<string, number>();
     const hourlyBuckets = new Array<number>(24).fill(0);
+    const dailyBuckets = new Array<number>(7).fill(0);
 
     try {
       const sessionDirs = fs
@@ -163,6 +164,13 @@ export class ClaudeLocalProvider implements IUsageProvider {
                   Math.min(23, 23 - Math.floor(ageMs / 3_600_000)),
                 );
                 hourlyBuckets[idx] += parsed.tokens;
+              }
+
+              // 7d daily sparkline
+              if (parsed.ts >= start7d && parsed.ts <= nowMs) {
+                const ageDays = Math.floor((nowMs - parsed.ts) / 86_400_000);
+                const idx = Math.max(0, Math.min(6, 6 - ageDays));
+                dailyBuckets[idx] += parsed.tokens;
               }
 
               // Collect for window detection
@@ -222,6 +230,7 @@ export class ClaudeLocalProvider implements IUsageProvider {
       lastUpdated: now,
       breakdown,
       hourlyLast24h: hourlyBuckets,
+      dailyLast7d: dailyBuckets,
       currentWindowStart:
         windowStartMs !== null ? new Date(windowStartMs) : undefined,
       currentWindowEnd:

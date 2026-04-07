@@ -12,6 +12,7 @@ interface UpdatePayload {
   providers: Array<{ name: string; ok: boolean; detail: string }>;
   modelBreakdown: Array<{ model: string; tokens: number; pct: number }>;
   hourlyLast24h: number[];
+  dailyLast7d: number[];
   /** Epoch ms of the window reset, or null if no active window. */
   windowResetAt: number | null;
 }
@@ -185,6 +186,7 @@ export class UsageWebviewProvider implements vscode.WebviewViewProvider {
         })) ?? [],
       modelBreakdown,
       hourlyLast24h: data?.hourlyLast24h ?? [],
+      dailyLast7d: data?.dailyLast7d ?? [],
       windowResetAt: data?.bestWindowEnd ? data.bestWindowEnd.getTime() : null,
     };
 
@@ -464,6 +466,16 @@ function buildHtml(): string {
     <div class="spark-labels"><span>-24h</span><span>-12h</span><span>now</span></div>
   </div>
 
+  <!-- Sparkline 7d -->
+  <div id="sparkline7d-block" style="display:none">
+    <div class="divider"></div>
+    <div class="block-header" style="margin-bottom:4px">
+      <span><span class="icon">📅</span>Last 7 days</span>
+    </div>
+    <div class="sparkline" id="sparkline7d"></div>
+    <div class="spark-labels"><span>-7d</span><span>-4d</span><span>today</span></div>
+  </div>
+
   <div class="divider"></div>
 
   <!-- Providers -->
@@ -572,7 +584,7 @@ function buildHtml(): string {
       '</div>'
     ).join('');
 
-    // Sparkline
+    // Sparkline 24h
     if (d.hourlyLast24h && d.hourlyLast24h.length === 24) {
       const maxVal = Math.max(1, ...d.hourlyLast24h);
       const sparkEl = document.getElementById('sparkline');
@@ -584,6 +596,21 @@ function buildHtml(): string {
       document.getElementById('sparkline-block').style.display = '';
     } else {
       document.getElementById('sparkline-block').style.display = 'none';
+    }
+
+    // Sparkline 7d
+    if (d.dailyLast7d && d.dailyLast7d.length === 7) {
+      const maxVal7d = Math.max(1, ...d.dailyLast7d);
+      const spark7dEl = document.getElementById('sparkline7d');
+      spark7dEl.innerHTML = d.dailyLast7d.map((v, i) => {
+        const h = Math.max(1, Math.round((v / maxVal7d) * 100));
+        const daysAgo = 6 - i;
+        const label = fmt(v) + ' tok (' + (daysAgo === 0 ? 'today' : daysAgo + 'd ago') + ')';
+        return '<div class="spark-bar" style="height:' + h + '%" title="' + label + '"></div>';
+      }).join('');
+      document.getElementById('sparkline7d-block').style.display = '';
+    } else {
+      document.getElementById('sparkline7d-block').style.display = 'none';
     }
 
     // Model breakdown — use DOM APIs to avoid innerHTML injection
