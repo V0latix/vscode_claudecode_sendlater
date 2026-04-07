@@ -13,6 +13,7 @@ import { addMinutes, formatDisplayTime, isOverdue } from "../util/time";
 // ── Message types (webview → extension) ───────────────────────────────────────
 type InMsg =
   | { type: "ready" }
+  | { type: "triggerRateLimitCommand" }
   | { type: "pasteClipboard" }
   | { type: "useSelection" }
   | { type: "queuePrompt"; promptText: string; delayMinutes: number }
@@ -208,6 +209,10 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
         this.sendQueue();
         break;
 
+      case "triggerRateLimitCommand":
+        await vscode.commands.executeCommand("promptQueue.imRateLimited");
+        break;
+
       case "pasteClipboard": {
         const text = await vscode.env.clipboard.readText();
         if (!text.trim()) {
@@ -394,11 +399,37 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
     gap: 6px;
   }
 
+  /* ── Section header row (mode toggle + rl hint) ──────────────────────── */
+  .section-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  /* ── Rate-limit hint button ───────────────────────────────────────────── */
+  .btn-rl-hint {
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px dashed var(--vscode-input-border, rgba(128,128,128,.3));
+    border-radius: 3px;
+    padding: 3px 8px;
+    font-size: 0.78em;
+    cursor: pointer;
+    white-space: nowrap;
+    font-family: inherit;
+  }
+  .btn-rl-hint:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder, #007acc);
+    background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.1));
+  }
+
   /* ── Mode toggle ──────────────────────────────────────────────────────── */
   .mode-toggle {
     display: flex;
     gap: 0;
-    margin-bottom: 8px;
     border: 1px solid var(--vscode-input-border, rgba(128,128,128,.3));
     border-radius: 3px;
     overflow: hidden;
@@ -753,9 +784,12 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
 <div class="section">
   <div class="section-title">✏️ Your Prompt</div>
 
-  <div class="mode-toggle">
-    <button class="mode-btn active" id="modeDelay">In X min</button>
-    <button class="mode-btn" id="modeAt">At time</button>
+  <div class="section-header-row">
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="modeDelay">In X min</button>
+      <button class="mode-btn" id="modeAt">At time</button>
+    </div>
+    <button class="btn-rl-hint" id="rlHintBtn" title="Detect rate-limit reset time from clipboard">⚡ Rate-limited?</button>
   </div>
 
   <div class="delay-row" id="rowDelay">
@@ -821,6 +855,7 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   let lastItems = []; // last queue snapshot, used for local re-renders
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
+  const rlHintBtn     = document.getElementById('rlHintBtn');
   const modeDelayBtn  = document.getElementById('modeDelay');
   const modeAtBtn     = document.getElementById('modeAt');
   const rowDelay      = document.getElementById('rowDelay');
@@ -856,6 +891,10 @@ export class QueueWebviewProvider implements vscode.WebviewViewProvider {
   updateQueueBtn();
 
   // ── Event listeners ───────────────────────────────────────────────────────
+  rlHintBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'triggerRateLimitCommand' });
+  });
+
   modeDelayBtn.addEventListener('click', () => { applyMode('delay'); persist(); });
   modeAtBtn.addEventListener('click',    () => { applyMode('at');    persist(); });
 

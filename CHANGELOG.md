@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.6] — 2026-04-07
+
+### Added
+- **Sparkline 7 jours** — Le panel Usage Monitor affiche désormais un histogramme journalier (7 barres) en plus du sparkline horaire 24h. Masqué automatiquement quand l'usage cumulé est nul (évite les faux positifs visuels).
+
+### Changed
+- **Rate-limit detection** — La grande carte "Rate Limit" en haut du panel Queue est remplacée par un bouton compact "⚡ Rate-limited?" intégré à la ligne de délai. Un clic déclenche `promptQueue.imRateLimited` pour auto-détecter le message de rate-limit depuis le presse-papier et pré-remplir le délai.
+
+### Fixed
+- **Sparkline 7d : barres fantômes** — Le rendu forçait une hauteur minimale de 1% même pour les valeurs nulles, affichant une activité fictive. Les jours sans token sont maintenant dessinés à hauteur 0 ; le bloc est masqué si tous les jours sont à zéro.
+- **Version manifest** — `package.json` bumped de 0.3.5 à 0.3.6 (incohérence de versioning corrigée).
+
 ## [0.3.5] — 2026-04-04
 
 ### Added

@@ -598,12 +598,13 @@ function buildHtml(): string {
       document.getElementById('sparkline-block').style.display = 'none';
     }
 
-    // Sparkline 7d
-    if (d.dailyLast7d && d.dailyLast7d.length === 7) {
+    // Sparkline 7d — hide entirely when no activity (avoids phantom bars)
+    const daily7dSum = d.dailyLast7d ? d.dailyLast7d.reduce((s, v) => s + v, 0) : 0;
+    if (d.dailyLast7d && d.dailyLast7d.length === 7 && daily7dSum > 0) {
       const maxVal7d = Math.max(1, ...d.dailyLast7d);
       const spark7dEl = document.getElementById('sparkline7d');
       spark7dEl.innerHTML = d.dailyLast7d.map((v, i) => {
-        const h = Math.max(1, Math.round((v / maxVal7d) * 100));
+        const h = v > 0 ? Math.max(2, Math.round((v / maxVal7d) * 100)) : 0;
         const daysAgo = 6 - i;
         const label = fmt(v) + ' tok (' + (daysAgo === 0 ? 'today' : daysAgo + 'd ago') + ')';
         return '<div class="spark-bar" style="height:' + h + '%" title="' + label + '"></div>';

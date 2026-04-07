@@ -239,3 +239,115 @@ suite("Quota alert logic", () => {
     assert.ok(!result.alert);
   });
 });
+
+// ── Daily bucket logic (7-day sparkline) ──────────────────────────────────
+
+// Mirrors the production formula in ClaudeLocalProvider.fetchUsage() for dailyBuckets.
+function computeDailyBucketIndex(nowMs: number, ts: number): number | null {
+  const start7d = nowMs - 7 * 86_400_000;
+  if (ts < start7d || ts > nowMs) {
+    return null;
+  }
+  const ageDays = Math.floor((nowMs - ts) / 86_400_000);
+  return Math.max(0, Math.min(6, 6 - ageDays));
+}
+
+suite("ClaudeLocalProvider — daily bucket logic (7d sparkline)", () => {
+  test("entry right now lands in bucket 6 (today)", () => {
+    const nowMs = Date.now();
+    assert.strictEqual(computeDailyBucketIndex(nowMs, nowMs), 6);
+  });
+
+  test("entry 1h ago lands in bucket 6 (today)", () => {
+    const nowMs = Date.now();
+    assert.strictEqual(computeDailyBucketIndex(nowMs, nowMs - 3_600_000), 6);
+  });
+
+  test("entry exactly 1 day ago lands in bucket 5", () => {
+    const nowMs = Date.now();
+    const ts = nowMs - 86_400_000; // 24h ago
+    assert.strictEqual(computeDailyBucketIndex(nowMs, ts), 5);
+  });
+
+  test("entry exactly 6 days ago lands in bucket 0 (oldest)", () => {
+    const nowMs = Date.now();
+    const ts = nowMs - 6 * 86_400_000; // 6d ago
+    assert.strictEqual(computeDailyBucketIndex(nowMs, ts), 0);
+  });
+
+  test("entry 7+ days ago is out of window (returns null)", () => {
+    const nowMs = Date.now();
+    const ts = nowMs - 8 * 86_400_000; // 8d ago
+    assert.strictEqual(computeDailyBucketIndex(nowMs, ts), null);
+  });
+
+  test("future timestamp returns null (clock skew)", () => {
+    const nowMs = Date.now();
+    const ts = nowMs + 60_000; // 1 min in the future
+    assert.strictEqual(computeDailyBucketIndex(nowMs, ts), null);
+  });
+
+  test("all 7 mid-day entries map to distinct buckets 0–6", () => {
+    const nowMs = new Date("2026-04-07T12:00:00Z").getTime();
+    const buckets = new Set<number>();
+    for (let d = 0; d <= 6; d++) {
+      const ts = nowMs - d * 86_400_000;
+      const idx = computeDailyBucketIndex(nowMs, ts);
+      assert.ok(idx !== null, `day=${d} should be in window`);
+      buckets.add(idx!);
+    }
+    assert.strictEqual(
+      buckets.size,
+      7,
+      "each day should map to a unique bucket",
+    );
+  });
+});
+
+// ── Sparkline 7d rendering logic ──────────────────────────────────────────
+
+// Mirrors the rendering guard in UsageWebviewProvider buildHtml() JS section.
+function shouldShowSparkline7d(daily: number[]): boolean {
+  if (daily.length !== 7) {
+    return false;
+  }
+  const sum = daily.reduce((s, v) => s + v, 0);
+  return sum > 0;
+}
+
+// Mirrors the bar-height formula: 0-value bars render at height 0.
+function barHeight7d(v: number, maxVal: number): number {
+  return v > 0 ? Math.max(2, Math.round((v / maxVal) * 100)) : 0;
+}
+
+suite("Sparkline 7d — rendering logic", () => {
+  test("all-zero array → block hidden", () => {
+    assert.ok(!shouldShowSparkline7d([0, 0, 0, 0, 0, 0, 0]));
+  });
+
+  test("at least one non-zero value → block visible", () => {
+    assert.ok(shouldShowSparkline7d([0, 0, 0, 0, 0, 0, 100]));
+  });
+
+  test("wrong length (< 7) → block hidden", () => {
+    assert.ok(!shouldShowSparkline7d([100, 200, 300]));
+  });
+
+  test("zero value renders bar at height 0 (no phantom bar)", () => {
+    assert.strictEqual(barHeight7d(0, 1000), 0);
+  });
+
+  test("non-zero value renders bar with at least 2% height", () => {
+    const h = barHeight7d(1, 10_000_000); // tiny relative value
+    assert.ok(h >= 2, `Expected h>=2, got ${h}`);
+  });
+
+  test("max value renders bar at 100%", () => {
+    assert.strictEqual(barHeight7d(1000, 1000), 100);
+  });
+
+  test("value proportional to max", () => {
+    const h = barHeight7d(500, 1000);
+    assert.strictEqual(h, 50);
+  });
+});
