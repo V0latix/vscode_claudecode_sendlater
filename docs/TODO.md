@@ -33,15 +33,15 @@ Voir CHANGELOG v0.3.3–v0.3.5 pour le détail. Résumé des grandes features li
 
 ### Amélioration de l'UI
 
-  - Retirer la partie haute de la partie prompt queue avec la detection des rate-limit.
-  - Ajouté des stats des tokens dans la semaine et pas seulement dans les 24h.
-  
+  - [x] **Retirer la partie haute du panel Prompt Queue** — La grande carte "Rate Limit" est remplacée par un bouton compact "⚡ Rate-limited?" intégré à la ligne de délai (v0.3.6).
+  - [x] **Stats des tokens sur la semaine** — Sparkline 7 jours ajouté au panel Usage Monitor, en plus du sparkline horaire 24h. Masqué automatiquement si l'usage cumulé est nul (v0.3.6).
+
 ### Éditeur de settings Claude Code
 
-  - Toggle `includeCoAuthoredBy` (co-author dans les commits git).
-  - `permissions.allow` / `permissions.deny` : liste éditable des règles d'accès aux outils (ex. `Bash(git log *)`, `Read`, `Write`).
-  - Sélecteur de thème (`light` / `dark` / `system`) si le champ est présent.
-  - Bouton "Ouvrir le fichier brut" pour les cas avancés.
+  - [x] **Toggle `includeCoAuthoredBy`** — Checkbox dans le panel "Claude Settings" (v0.3.7).
+  - [x] **`permissions.allow` / `permissions.deny`** — Listes éditables avec boutons +Add / ×Remove (v0.3.7).
+  - [x] **Sélecteur de thème** — `light` / `dark` / `system` / *(not set)* — supprime la clé si non défini (v0.3.7).
+  - [x] **Bouton "Ouvrir le fichier brut"** — Ouvre `~/.claude/settings.json` dans l'éditeur VS Code (v0.3.7).
 
 ### Agents Browser & Editor
 
